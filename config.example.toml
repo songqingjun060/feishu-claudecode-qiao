@@ -1,0 +1,39 @@
+[feishu]
+app_id = "cli_xxxxx"
+app_secret = ""
+domain = "https://open.feishu.cn"
+
+[claude]
+command = "claude"
+work_dir = "."
+permission_mode = "safe"
+
+[vision]
+provider = "api"
+api_key = ""
+# Kimi Coding key example:
+# base_url = "https://api.kimi.com/coding/"
+# model = "kimi-for-coding"
+# OpenAI-compatible provider example:
+# base_url = "https://api.example.com/v1"
+# model = "your-vision-model"
+base_url = ""
+model = ""
+
+[whisper]
+model = "base"
+
+[bridge]
+data_dir = "./data"
+log_level = "INFO"
+max_upload_mb = 20
+require_mention_in_group = true
+bot_display_name = ""
+personal_permission_profile = "admin"
+# If bot_admins is empty, bot_owner_id is the only user allowed to change group rules.
+bot_owner_id = ""
+bot_admins = []
+
+[security]
+allowed_paths = []
+blocked_keywords = []

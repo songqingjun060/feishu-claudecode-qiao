@@ -1,0 +1,13 @@
+[project]
+name = "feishu-claudecode-qiao"
+version = "0.1.0"
+description = "Feishu-Claude Bridge (Qiao Edition)"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.31.0", "tomli>=2.0.0; python_version<'3.11'"]
+
+[project.optional-dependencies]
+voice = ["faster-whisper>=1.0.0", "imageio-ffmpeg>=0.5.0"]
+dev = ["pytest>=8.0.0", "ruff>=0.4.0"]
+
+[project.scripts]
+feishu-qiao = "feishu_claudecode_qiao.bridge:main"

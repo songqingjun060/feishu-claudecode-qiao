@@ -1,0 +1,165 @@
+import json
+
+from feishu_claudecode_qiao.bridge import Bridge
+from feishu_claudecode_qiao.config import Config
+
+
+def make_bridge(tmp_path):
+    return Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+        )
+    )
+
+
+def make_text_event(chat_id="oc_1", sender="ou_1", text="hello"):
+    return {
+        "event": {
+            "sender": {"sender_id": {"user_id": sender, "name": "tester"}},
+            "message": {
+                "message_id": "om_1",
+                "chat_type": "p2p",
+                "chat_id": chat_id,
+                "message_type": "text",
+                "content": json.dumps({"text": text}, ensure_ascii=False),
+            },
+        }
+    }
+
+
+def make_post_event(chat_id="oc_1", sender="ou_1"):
+    return {
+        "event": {
+            "sender": {"sender_id": {"user_id": sender, "name": "tester"}},
+            "message": {
+                "message_id": "om_post",
+                "chat_type": "p2p",
+                "chat_id": chat_id,
+                "message_type": "post",
+                "content": json.dumps(
+                    {
+                        "title": "",
+                        "content": [
+                            [{"tag": "img", "image_key": "img_v3_abc"}],
+                            [{"tag": "text", "text": "识别图片内容", "style": []}],
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        }
+    }
+
+
+def test_process_post_event_downloads_embedded_image_and_uses_vision(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    calls = []
+
+    monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: "r_1")
+    monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: True)
+    monkeypatch.setattr(bridge, "_download_image", lambda message_id, image_key: calls.append(("download", message_id, image_key)) or "D:/tmp/image.png")
+    monkeypatch.setattr(bridge, "_call_vision_api", lambda image_path, prompt: calls.append(("vision", image_path, prompt)) or "图片里有表格")
+    monkeypatch.setattr(bridge, "_call_claude", lambda prompt, *args, **kwargs: calls.append(("claude", prompt)) or ("reply", "sid_1"))
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event(make_post_event())
+
+    assert ("download", "om_post", "img_v3_abc") in calls
+    assert any(call[0] == "vision" and call[1] == "D:/tmp/image.png" for call in calls)
+    assert any(call[0] == "claude" and "识别图片内容" in call[1] and "图片里有表格" in call[1] for call in calls)
+
+
+def test_process_event_accepts_raw_sender_without_user_id(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    sent = []
+
+    event = make_text_event(sender=None)
+    sender_id = event["event"]["sender"]["sender_id"]
+    sender_id["open_id"] = "ou_open"
+    sender_id["union_id"] = "on_union"
+    sender_id.pop("name", None)
+
+    monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: "r_1")
+    monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: True)
+    monkeypatch.setattr(bridge, "_call_claude", lambda *args, **kwargs: ("reply", "sid_1"))
+    monkeypatch.setattr(bridge, "_send_reply", lambda chat_id, content, msg_type="text": sent.append(content) or True)
+
+    bridge._process_event(event)
+
+    assert sent
+    assert bridge.session_store.get("chat:oc_1").session_id == "sid_1"
+
+
+def test_add_message_reaction_posts_receive_emoji(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    calls = []
+
+    class FakeResponse:
+        def json(self):
+            return {"code": 0, "data": {"reaction_id": "r_1"}}
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(bridge, "_get_token", lambda: "tenant-token")
+    monkeypatch.setattr("feishu_claudecode_qiao.bridge.requests.post", fake_post)
+
+    reaction_id = bridge._add_message_reaction("om_1")
+
+    assert reaction_id == "r_1"
+    assert calls[0][0].endswith("/open-apis/im/v1/messages/om_1/reactions")
+    assert calls[0][1]["json"] == {"reaction_type": {"emoji_type": "OK"}}
+
+
+def test_add_message_reaction_failure_does_not_raise(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    monkeypatch.setattr(bridge, "_get_token", lambda: (_ for _ in ()).throw(RuntimeError("token failed")))
+
+    assert bridge._add_message_reaction("om_1") is None
+
+
+def test_delete_message_reaction_deletes_returned_reaction_id(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    calls = []
+
+    class FakeResponse:
+        def json(self):
+            return {"code": 0, "msg": "success"}
+
+    def fake_delete(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(bridge, "_get_token", lambda: "tenant-token")
+    monkeypatch.setattr("feishu_claudecode_qiao.bridge.requests.delete", fake_delete)
+
+    assert bridge._delete_message_reaction("om_1", "r_1") is True
+    assert calls[0][0].endswith("/open-apis/im/v1/messages/om_1/reactions/r_1")
+
+
+def test_delete_message_reaction_failure_does_not_raise(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    monkeypatch.setattr(bridge, "_get_token", lambda: (_ for _ in ()).throw(RuntimeError("token failed")))
+
+    assert bridge._delete_message_reaction("om_1", "r_1") is False
+
+
+def test_process_event_adds_and_removes_message_reaction(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    calls = []
+
+    monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: calls.append(("add", message_id)) or "r_1")
+    monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: calls.append(("delete", message_id, reaction_id)) or True)
+    monkeypatch.setattr(bridge, "_call_claude", lambda *args, **kwargs: ("reply", "sid_1"))
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: calls.append(("reply", args[0], args[1])) or True)
+
+    bridge._process_event(make_text_event())
+
+    assert calls[0] == ("add", "om_1")
+    assert calls[1][0] == "reply"
+    assert calls[1][1] == "oc_1"
+    assert json.loads(calls[1][2]) == {"text": "reply"}
+    assert calls[-1] == ("delete", "om_1", "r_1")
