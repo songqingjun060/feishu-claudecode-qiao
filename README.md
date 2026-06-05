@@ -2,6 +2,48 @@
 
 Feishu-Claudecode-Qiao is a Feishu bot bridge for Claude Code. It receives Feishu messages, applies per-chat rules and safety checks, calls Claude CLI, and sends formatted replies back to Feishu.
 
+## 中文快速说明
+
+Feishu-Claudecode-Qiao 是一个“飞书机器人 -> Claude Code CLI”的本地桥接工具。飞书群聊或个人会话里的消息会先进入本桥，桥会按当前会话规则做安全检查，然后调用本机 Claude Code，最后把回复、生成的文件或查询结果发回飞书。
+
+适合场景：
+
+- 在飞书里直接让 Claude Code 查询、分析、生成文件或处理本地项目。
+- 给不同群设置不同的工作目录、可访问路径和权限档位。
+- 个人会话使用更高权限，群聊默认使用更保守的规则。
+- 让 Claude Code 处理飞书上传的图片、音频、PDF、Office、压缩包等文件。
+
+权限逻辑：
+
+- 个人会话默认使用 `bridge.personal_permission_profile`，可信本地部署可以设为 `admin`，对应 Claude Code 的 `bypassPermissions`。
+- 群聊规则只对当前群生效，必须在该群里 @ 当前机器人后设置。
+- 群规则管理不依赖飞书群管理员。若配置了 `bridge.bot_admins`，只有这些用户能改规则；否则只有 `bridge.bot_owner_id` 能改。
+- 群聊建议保持 `require_mention_in_group = true`，避免机器人响应无关消息。
+- `allowed_paths` 为空不是“允许全盘”。如需允许读取或上传本地路径，请在规则或配置里明确放行路径。
+
+文件处理说明：
+
+- 桥负责接收飞书文件、下载到本地、把本地文件路径交给 Claude Code。
+- PDF、Word、Excel、PPT、压缩包、视频等内容优先由 Claude Code 使用本机工具处理，本桥本身不做重解析。
+- Claude Code 生成的本地文件如果符合规则，会自动上传回当前飞书会话。
+- 真实运行数据、密钥、日志和本地附件不要提交到 Git；本仓库已通过 `.gitignore` 忽略 `config.toml`、`config.realtest.toml`、`data/`、`data-test/`、日志和压缩包。
+
+最小启动流程：
+
+```powershell
+copy config.example.toml config.toml
+# 编辑 config.toml，填入飞书 App ID / Secret、Claude 命令、工作目录和权限配置
+python -m pip install -e ".[dev,voice]"
+python start_ws.py restart --config config.toml --profile qiao-test
+python -m feishu_claudecode_qiao --config config.toml
+```
+
+Windows 前台运行推荐：
+
+```powershell
+.\run_foreground.ps1 -Config config.toml -Profile qiao-test
+```
+
 ## Current Capabilities
 
 - Text chat with Claude Code.
