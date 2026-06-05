@@ -19,11 +19,17 @@ def test_build_claude_popen_args_for_normal_exe(tmp_path):
 
 def test_build_claude_popen_args_for_cmd_uses_list2cmdline(tmp_path):
     import subprocess
+    import sys
+
     bridge = make_bridge(tmp_path)
     popen_args, shell = bridge._build_claude_popen_args([r"C:\Program Files\Claude\claude.cmd", "--print"])
-    assert isinstance(popen_args, str)
-    assert '"C:\\Program Files\\Claude\\claude.cmd"' in popen_args
-    assert shell is True
+    if sys.platform == "win32":
+        assert isinstance(popen_args, str)
+        assert '"C:\\Program Files\\Claude\\claude.cmd"' in popen_args
+        assert shell is True
+    else:
+        assert popen_args == [r"C:\Program Files\Claude\claude.cmd", "--print"]
+        assert shell is False
 
 
 def test_build_claude_args_includes_bypass_permission_mode(tmp_path):
@@ -54,6 +60,8 @@ def test_build_claude_args_includes_default_permission_mode(tmp_path):
 
 
 def test_find_claude_cli_prefers_executable_extension(tmp_path, monkeypatch):
+    import sys
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "claude").write_text("not executable on windows", encoding="utf-8")
@@ -63,4 +71,8 @@ def test_find_claude_cli_prefers_executable_extension(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     monkeypatch.setenv("PATH", str(bin_dir))
 
-    assert bridge._find_claude_cli().lower().endswith("claude.cmd")
+    found = bridge._find_claude_cli().lower()
+    if sys.platform == "win32":
+        assert found.endswith("claude.cmd")
+    else:
+        assert found.endswith("claude")
