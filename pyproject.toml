@@ -11,3 +11,6 @@ dev = ["pytest>=8.0.0", "ruff>=0.4.0"]
 
 [project.scripts]
 feishu-qiao = "feishu_claudecode_qiao.bridge:main"
+
+[tool.setuptools.packages.find]
+include = ["feishu_claudecode_qiao*"]
