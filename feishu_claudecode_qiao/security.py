@@ -85,8 +85,18 @@ class SecurityPolicy:
             return ["--permission-mode", self.permission_mode]
         return []
 
+    def _blocked_path_match(self, path: str) -> str:
+        for pattern in self._BLOCKED_PATH_PATTERNS:
+            if re.search(pattern, path, re.IGNORECASE):
+                return pattern
+        return ""
+
     def is_path_allowed(self, path: str | Path) -> bool:
         """Check if a file path is within allowed directories."""
+        raw_path = str(path)
+        if self._blocked_path_match(raw_path):
+            return False
+
         try:
             target = Path(path).resolve()
         except (OSError, ValueError):
@@ -94,9 +104,8 @@ class SecurityPolicy:
 
         # Check blocked patterns
         path_str = str(target)
-        for pattern in self._BLOCKED_PATH_PATTERNS:
-            if re.search(pattern, path_str, re.IGNORECASE):
-                return False
+        if self._blocked_path_match(path_str):
+            return False
 
         # Check if within default allowed dirs
         allowed_dirs = [self.work_dir, self.data_dir] + self.allowed_paths
@@ -111,6 +120,15 @@ class SecurityPolicy:
 
     def explain_path(self, path: str | Path) -> PathCheckResult:
         """Explain why a path is allowed or blocked."""
+        raw_path = str(path)
+        raw_pattern = self._blocked_path_match(raw_path)
+        if raw_pattern:
+            return PathCheckResult(
+                allowed=False,
+                reason="Path matches a blocked system pattern",
+                matched_pattern=raw_pattern,
+            )
+
         try:
             target = Path(path).resolve()
         except (OSError, ValueError) as e:
@@ -119,13 +137,13 @@ class SecurityPolicy:
         path_str = str(target)
 
         # Check blocked patterns
-        for pattern in self._BLOCKED_PATH_PATTERNS:
-            if re.search(pattern, path_str, re.IGNORECASE):
-                return PathCheckResult(
-                    allowed=False,
-                    reason="Path matches a blocked system pattern",
-                    matched_pattern=pattern,
-                )
+        resolved_pattern = self._blocked_path_match(path_str)
+        if resolved_pattern:
+            return PathCheckResult(
+                allowed=False,
+                reason="Path matches a blocked system pattern",
+                matched_pattern=resolved_pattern,
+            )
 
         # Check if within default allowed dirs
         allowed_dirs = [self.work_dir, self.data_dir] + self.allowed_paths
