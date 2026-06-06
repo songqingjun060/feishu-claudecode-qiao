@@ -18,7 +18,7 @@ def test_doctor_levels_present():
 
 def test_print_results_optional_failure_does_not_return_one():
     results = [
-        {"check": "vision_api_key", "ok": False, "level": "optional"},
+        {"check": "whisper", "ok": False, "level": "optional"},
         {"check": "claude_cli", "ok": True, "level": "required"},
     ]
     assert print_results(results) == 0

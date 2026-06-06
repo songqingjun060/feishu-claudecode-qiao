@@ -31,12 +31,6 @@ class Config:
     claude_work_dir: str = "."
     claude_permission_mode: str = "bypassPermissions"
 
-    # Vision
-    vision_provider: str = "api"
-    vision_api_key: str = ""
-    vision_base_url: str = ""
-    vision_model: str = ""
-
     # Whisper
     whisper_model: str = "base"
 
@@ -78,10 +72,6 @@ def _env_override(cfg: Config) -> Config:
         claude_command=_get("FEISHUCLAUDECODE_CLAUDE_COMMAND", cfg.claude_command),
         claude_work_dir=_get("FEISHUCLAUDECODE_CLAUDE_WORK_DIR", cfg.claude_work_dir),
         claude_permission_mode=_get("FEISHUCLAUDECODE_CLAUDE_PERMISSION_MODE", cfg.claude_permission_mode),
-        vision_provider=_get("FEISHUCLAUDECODE_VISION_PROVIDER", cfg.vision_provider),
-        vision_api_key=_get("FEISHUCLAUDECODE_VISION_API_KEY", cfg.vision_api_key),
-        vision_base_url=_get("FEISHUCLAUDECODE_VISION_BASE_URL", cfg.vision_base_url),
-        vision_model=_get("FEISHUCLAUDECODE_VISION_MODEL", cfg.vision_model),
         whisper_model=_get("FEISHUCLAUDECODE_WHISPER_MODEL", cfg.whisper_model),
         bridge_data_dir=_get("FEISHUCLAUDECODE_BRIDGE_DATA_DIR", cfg.bridge_data_dir),
         bridge_log_level=_get("FEISHUCLAUDECODE_BRIDGE_LOG_LEVEL", cfg.bridge_log_level),
@@ -118,10 +108,6 @@ def load_config(path: str | Path | None = None) -> Config:
             claude_command=data.get("claude", {}).get("command", "claude"),
             claude_work_dir=data.get("claude", {}).get("work_dir", "."),
             claude_permission_mode=data.get("claude", {}).get("permission_mode", "bypassPermissions"),
-            vision_provider=data.get("vision", {}).get("provider", "api"),
-            vision_api_key=data.get("vision", {}).get("api_key", ""),
-            vision_base_url=data.get("vision", {}).get("base_url", ""),
-            vision_model=data.get("vision", {}).get("model", ""),
             whisper_model=data.get("whisper", {}).get("model", "base"),
             bridge_data_dir=data.get("bridge", {}).get("data_dir", "./data"),
             bridge_log_level=data.get("bridge", {}).get("log_level", "INFO"),

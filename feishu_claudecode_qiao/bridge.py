@@ -10,17 +10,14 @@ Design principles:
 from __future__ import annotations
 
 import argparse
-import base64
 import html
 import json
 import mimetypes
 import os
 import re
-import ssl
 import subprocess
 import sys
 import time
-import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -742,6 +739,8 @@ class Bridge:
             tools = "direct text reading"
         elif suffix in (".zip", ".7z", ".rar"):
             tools = "archive listing/extraction tools, then read extracted files"
+        elif suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"):
+            tools = "Claude Code image understanding or local OCR/image tools"
         elif suffix in (".mp4", ".mov", ".mkv", ".avi", ".webm", ".wmv", ".flv", ".m4v"):
             tools = "ffprobe/ffmpeg for metadata, keyframes, thumbnails, and audio extraction"
         else:
@@ -751,7 +750,7 @@ class Bridge:
             f"- file: {Path(path).expanduser().resolve()}\n"
             f"- preferred_reader: {tools}\n"
             "- instruction: Use local Python libraries or lightweight text extraction first. "
-            "Do not rely on pdftoppm as the first option for PDFs; for videos, use ffprobe/ffmpeg directly to inspect metadata, extract a few representative frames, or extract audio when needed. If one tool is missing, try another available local reader.\n"
+            "For images, inspect the local image directly or use OCR/image tooling when needed. Do not rely on pdftoppm as the first option for PDFs; for videos, use ffprobe/ffmpeg directly to inspect metadata, extract a few representative frames, or extract audio when needed. If one tool is missing, try another available local reader.\n"
             "</bridge_file_tool_hint>"
         )
 
@@ -1295,9 +1294,13 @@ class Bridge:
             image_key = self._extract_post_image_key(content_obj)
             if image_key:
                 img_path = self._download_image(msg_id, image_key)
+                if img_path:
+                    self._cache_recent_file_path(chat_id, img_path)
                 self.msg_logger.info(f"Post image downloaded: {img_path}")
             post_text = self._extract_post_text(content_obj)
             content = post_text or "[富文本消息]"
+            if img_path:
+                content = f"{content}\n[图片] {img_path}"
 
         # Build prompt with rollover summary
         content = self._append_file_tool_hints(content)
@@ -1307,15 +1310,7 @@ class Bridge:
 
         # Call Claude and send reply
         try:
-            if img_path:
-                vision_result = self._call_vision_api(
-                    img_path, "描述这张图片的内容"
-                )
-                prompt = self._build_prompt(
-                    chat_id, sender_name, content_for_prompt, effective_rule, vision_result
-                )
-            else:
-                prompt = self._build_prompt(chat_id, sender_name, content_for_prompt, effective_rule)
+            prompt = self._build_prompt(chat_id, sender_name, content_for_prompt, effective_rule)
 
             effective_workspace = effective_rule.get("workspace") or self.config.claude_work_dir
             permission_mode = permission_mode_for_profile(
@@ -1658,7 +1653,6 @@ Rules:
         sender_name: str,
         content: str,
         effective_rule: EffectiveRule,
-        vision_result: str | None = None,
     ) -> str:
         """Build the prompt sent to Claude CLI."""
         custom_prompt = effective_rule.get("custom_prompt", "")
@@ -1677,8 +1671,6 @@ Rules:
         parts.append(f"用户: {sender_name}")
         parts.append(f"消息: {content}")
 
-        if vision_result:
-            parts.append(f"图片分析: {vision_result}")
 
         return "\n\n".join(parts)
 
@@ -1837,140 +1829,6 @@ Rules:
                     final_text = result
 
         return final_text or "[Claude未返回内容]", new_session_id or session_id
-
-    # ------------------------------------------------------------------
-    # Vision API
-    # ------------------------------------------------------------------
-
-    def _vision_api_format(self) -> str:
-        base_url = (self.config.vision_base_url or "").rstrip("/")
-        if (
-            not base_url
-            or "anthropic" in base_url
-            or "api.kimi.com/coding" in base_url and not base_url.endswith("/v1")
-            and not base_url.endswith("/v1/chat/completions")
-        ):
-            return "anthropic"
-        return "openai"
-
-    def _vision_api_url(self, api_format: str) -> str:
-        base_url = (self.config.vision_base_url or "").rstrip("/")
-        if api_format == "anthropic":
-            if not base_url:
-                return "https://api.anthropic.com/v1/messages"
-            if base_url.endswith("/v1/messages"):
-                return base_url
-            if base_url.endswith("/v1"):
-                return f"{base_url}/messages"
-            return f"{base_url}/v1/messages"
-
-        if base_url.endswith("/chat/completions"):
-            return base_url
-        if base_url.endswith("/v1"):
-            return f"{base_url}/chat/completions"
-        return f"{base_url}/v1/chat/completions"
-
-    def _call_vision_api(self, image_path: str, prompt: str) -> str:
-        """Call vision API (Anthropic or OpenAI-compatible) for image analysis."""
-        api_key = self.config.vision_api_key
-        model = self.config.vision_model
-
-        if not api_key or not model:
-            return "[Vision API未配置]"
-
-        # Read image as base64
-        ext = Path(image_path).suffix.lower()
-        media_map = {
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
-        }
-        media_type = media_map.get(ext, "image/png")
-
-        with open(image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
-
-        # Determine API format
-        api_format = self._vision_api_format()
-        if api_format == "anthropic":
-            # Anthropic format
-            url = self._vision_api_url("anthropic")
-            payload: dict[str, Any] = {
-                "model": model,
-                "max_tokens": 4096,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image_data,
-                                },
-                            },
-                        ],
-                    }
-                ],
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            }
-        else:
-            # OpenAI-compatible format (Kimi, DeepSeek, etc.)
-            url = self._vision_api_url("openai")
-            payload = {
-                "model": model,
-                "max_tokens": 4096,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{media_type};base64,{image_data}"
-                                },
-                            },
-                        ],
-                    }
-                ],
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            }
-
-        try:
-            ctx = ssl.create_default_context()
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers=headers,
-                method="POST",
-            )
-            with urllib.request.urlopen(req, context=ctx, timeout=120) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-
-            # Parse response (compatible with both formats)
-            content = result.get("content", [])
-            if content:
-                return content[0].get("text", "")
-            choices = result.get("choices", [])
-            if choices:
-                return choices[0].get("message", {}).get("content", "")
-            return "[Vision API未返回内容]"
-
-        except Exception as e:
-            self.bridge_logger.exception(f"Vision API调用失败: {e}")
-            return f"[Vision API调用失败: {e}]"
 
     # ------------------------------------------------------------------
     # Feishu API

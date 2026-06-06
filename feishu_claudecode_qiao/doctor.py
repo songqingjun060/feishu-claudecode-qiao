@@ -9,7 +9,7 @@ from .config import load_config
 
 
 REQUIRED_CHECKS = {"feishu_app_id", "feishu_app_secret", "claude_cli", "data_dir_writable"}
-OPTIONAL_CHECKS = {"vision_api_key", "whisper"}
+OPTIONAL_CHECKS = {"whisper"}
 
 
 def run_doctor(config_path: str = "config.toml") -> list[dict[str, Any]]:
@@ -38,8 +38,6 @@ def run_doctor(config_path: str = "config.toml") -> list[dict[str, Any]]:
     except Exception as e:
         results.append({"check": "data_dir_writable", "ok": False, "level": "required", "hint": str(e)})
 
-    # vision
-    results.append({"check": "vision_api_key", "ok": bool(cfg.vision_api_key), "level": "optional", "hint": "已配置" if cfg.vision_api_key else "未配置"})
 
     # whisper
     try:

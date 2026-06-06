@@ -8,18 +8,6 @@ command = "claude"
 work_dir = "."
 permission_mode = "safe"
 
-[vision]
-provider = "api"
-api_key = ""
-# Kimi Coding key example:
-# base_url = "https://api.kimi.com/coding/"
-# model = "kimi-for-coding"
-# OpenAI-compatible provider example:
-# base_url = "https://api.example.com/v1"
-# model = "your-vision-model"
-base_url = ""
-model = ""
-
 [whisper]
 model = "base"
 

@@ -13,7 +13,5 @@ def test_config_defaults():
 
 def test_config_from_env(monkeypatch):
     monkeypatch.setenv("FEISHUCLAUDECODE_FEISHU_APP_ID", "from_env")
-    monkeypatch.setenv("FEISHUCLAUDECODE_VISION_API_KEY", "sk-test")
     config = load_config()
     assert config.feishu_app_id == "from_env"
-    assert config.vision_api_key == "sk-test"

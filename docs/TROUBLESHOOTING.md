@@ -53,31 +53,10 @@ Text replies are prefixed with a Feishu at-mention. Card replies add a mention a
 
 If quote/mention is missing, confirm you are running a version with the `_send_event_reply` path and the Feishu app has reply-message permission.
 
-## Image Recognition Returns 403
+## Image Handling
 
-For Kimi Coding keys, use the Anthropic-compatible endpoint:
+Images are downloaded by the bridge and passed to Claude Code as local file paths. If image analysis fails, check that the image resource was downloaded and that Claude Code can access the saved path under the current workspace/allowed_paths boundary.
 
-```toml
-[vision]
-api_key = "your-kimi-coding-key"
-base_url = "https://api.kimi.com/coding/"
-model = "kimi-for-coding"
-```
-
-The bridge will call:
-
-```text
-https://api.kimi.com/coding/v1/messages
-```
-
-Do not use the OpenAI-compatible `https://api.kimi.com/coding/v1/chat/completions` path with a Kimi Coding key. It can return:
-
-```text
-403 access_terminated_error
-Kimi For Coding is currently only available for Coding Agents...
-```
-
-For a non-Coding OpenAI-compatible provider, set `base_url` to the provider `/v1` base or full `/chat/completions` endpoint and use a compatible key/model.
 
 ## Audio Works In Private Chat But Not In Group
 
@@ -85,7 +64,7 @@ Check:
 
 - The Feishu app can receive group audio events.
 - The app has permission to download message resources.
-- `faster-whisper` and `imageio-ffmpeg` are installed:
+- `faster-whisper` and `imageio-ffmpeg` are installed for audio support:
 
 ```bash
 python -m pip install -e ".[voice]"

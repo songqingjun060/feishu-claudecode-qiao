@@ -16,7 +16,7 @@ Real Feishu deployment flows verified:
 - Local desktop Markdown file upload to group after rule validation.
 - Personal audio transcription.
 - Group audio transcription when user sends audio first and then mentions the bot.
-- Image recognition through Kimi Coding Anthropic-compatible API.
+- Image download and Claude Code local-path handoff.
 - Bridge restart starts from the current event-file end offset and does not replay old messages.
 - Stale Claude session id is cleared and retried once.
 

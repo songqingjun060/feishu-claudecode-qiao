@@ -39,7 +39,7 @@ DEFAULT_RULE = {
         "max_inline_chars": 3000,
     },
     "media": {
-        "image": "vision_to_text",
+        "image": "claude_image_path",
         "audio": "whisper_to_text",
         "file": "path_to_claude",
     },

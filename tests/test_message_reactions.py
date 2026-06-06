@@ -53,22 +53,23 @@ def make_post_event(chat_id="oc_1", sender="ou_1"):
     }
 
 
-def test_process_post_event_downloads_embedded_image_and_uses_vision(tmp_path, monkeypatch):
+def test_process_post_event_downloads_embedded_image_and_passes_path_to_claude(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     calls = []
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(b"fake image")
 
     monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: "r_1")
     monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: True)
-    monkeypatch.setattr(bridge, "_download_image", lambda message_id, image_key: calls.append(("download", message_id, image_key)) or "D:/tmp/image.png")
-    monkeypatch.setattr(bridge, "_call_vision_api", lambda image_path, prompt: calls.append(("vision", image_path, prompt)) or "图片里有表格")
+    monkeypatch.setattr(bridge, "_download_image", lambda message_id, image_key: calls.append(("download", message_id, image_key)) or str(image_path))
     monkeypatch.setattr(bridge, "_call_claude", lambda prompt, *args, **kwargs: calls.append(("claude", prompt)) or ("reply", "sid_1"))
     monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
 
     bridge._process_event(make_post_event())
 
     assert ("download", "om_post", "img_v3_abc") in calls
-    assert any(call[0] == "vision" and call[1] == "D:/tmp/image.png" for call in calls)
-    assert any(call[0] == "claude" and "识别图片内容" in call[1] and "图片里有表格" in call[1] for call in calls)
+    assert any(call[0] == "claude" and str(image_path) in call[1] for call in calls)
+    assert any(call[0] == "claude" and "For images, inspect the local image directly" in call[1] for call in calls)
 
 
 def test_process_event_accepts_raw_sender_without_user_id(tmp_path, monkeypatch):

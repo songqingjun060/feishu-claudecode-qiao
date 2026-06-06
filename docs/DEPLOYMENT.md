@@ -83,17 +83,9 @@ For trusted maintenance groups, create a rule file under `data/rules/<chat_id>.j
 }
 ```
 
-## 4. Optional Vision
+## 4. Media Handling
 
-Kimi Coding key:
-
-```toml
-[vision]
-provider = "api"
-api_key = "your-kimi-coding-key"
-base_url = "https://api.kimi.com/coding/"
-model = "kimi-for-coding"
-```
+Images, files, and videos are downloaded by the bridge and passed to Claude Code as local file paths. Configure Claude Code and local tools for content analysis; the bridge does not require a separate image-analysis API.
 
 ## 5. Run Self-Check
 
@@ -157,7 +149,7 @@ In a Feishu group:
 1. Send `@your-bot-display-name 测试连接`.
 2. Confirm the bot adds a temporary reaction and removes it after reply.
 3. Confirm the reply quotes your message and mentions you.
-4. Send an image and mention the bot.
+4. Send an image and mention the bot; confirm Claude receives the local image path.
 5. Send a short audio message, then mention the bot or say `@your-bot-display-name 读上一条消息`.
 6. Ask the bot to upload a small allowed local file.
 
