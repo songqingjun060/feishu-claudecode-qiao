@@ -178,6 +178,8 @@ default -> chat -> member -> temporary
 - 是否存在删除、移动、覆盖、shell、敏感路径读取等高风险意图。
 - 是否需要确认或拒绝。
 
+`workspace` 和 `allowed_paths` 会写入发送给 Claude Code 的安全边界提示中，要求 Claude 只讨论和处理当前会话授权的路径；桥本身仍会在读取本地路径、缓存文件和上传文件时做硬性路径校验。
+
 注意：`allowed_paths = []` 不是“允许全盘”。如需允许访问本地路径，请在规则或配置里明确放行。
 
 ## 文件处理
@@ -456,6 +458,8 @@ The bridge also checks:
 - Blocked keywords.
 - Risky intents such as delete, move, overwrite, shell, and sensitive path reads.
 - Whether confirmation or denial is required.
+
+`workspace` and `allowed_paths` are included in the security-boundary prompt sent to Claude Code, instructing Claude to only discuss and operate on paths authorized for the current chat. The bridge still enforces hard path checks when exposing local paths, caching files, or uploading files.
 
 Note: `allowed_paths = []` does not mean "allow all drives". Add explicit paths in rules or config when local access is required.
 

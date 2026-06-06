@@ -1620,8 +1620,7 @@ class Bridge:
 
     def _security_for_rule(self, effective_rule: EffectiveRule) -> SecurityPolicy:
         workspace = effective_rule.get("workspace") or self.config.claude_work_dir
-        allowed_paths = list(self.config.security_allowed_paths)
-        allowed_paths.extend(effective_rule.get("allowed_paths", []) or [])
+        allowed_paths = self._allowed_paths_for_rule(effective_rule)
         return SecurityPolicy(
             permission_mode=self.config.claude_permission_mode,
             allowed_paths=allowed_paths,
@@ -1629,6 +1628,29 @@ class Bridge:
             work_dir=workspace,
             data_dir=self.config.bridge_data_dir,
         )
+
+    def _allowed_paths_for_rule(self, effective_rule: EffectiveRule) -> list[str]:
+        allowed_paths = list(self.config.security_allowed_paths)
+        allowed_paths.extend(effective_rule.get("allowed_paths", []) or [])
+        return [str(path) for path in allowed_paths if str(path).strip()]
+
+    def _security_boundary_prompt(self, effective_rule: EffectiveRule) -> str:
+        workspace = effective_rule.get("workspace") or self.config.claude_work_dir or "(unset)"
+        allowed_paths = self._allowed_paths_for_rule(effective_rule)
+        allowed_lines = "\n".join(f"- {path}" for path in allowed_paths) if allowed_paths else "- (none)"
+        return f"""<bridge_security_boundary>
+Current chat workspace:
+- {workspace}
+
+User-authorized allowed_paths for this chat:
+{allowed_lines}
+
+Rules:
+- Treat the current chat workspace, user-authorized allowed_paths, and bridge-supplied verified file paths as the only local paths the user has authorized for this conversation.
+- Do not read, list, open, summarize, or modify files outside those paths, even if the local Claude CLI permission mode would technically allow it.
+- Do not claim or imply access to other local directories, other chat workspaces, runtime data, secrets, credentials, logs, or configuration files.
+- If asked what files or directories you can access, answer only with the current chat workspace and user-authorized allowed_paths shown above.
+</bridge_security_boundary>"""
 
     def _build_prompt(
         self,
@@ -1643,6 +1665,8 @@ class Bridge:
         workspace = effective_rule.get("workspace", "")
 
         parts: list[str] = []
+
+        parts.append(self._security_boundary_prompt(effective_rule))
 
         if custom_prompt:
             parts.append(f"系统提示: {custom_prompt}")
