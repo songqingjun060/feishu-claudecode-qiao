@@ -198,6 +198,17 @@ class Bridge:
                     return found
         return ""
 
+    def _extract_image_key(self, content_obj: Any, content_raw: Any = "") -> str:
+        if isinstance(content_obj, dict):
+            image_key = content_obj.get("image_key")
+            if image_key:
+                return str(image_key)
+        if isinstance(content_raw, str):
+            match = re.search(r"\[Image:\s*([^\]\s]+)\]", content_raw)
+            if match:
+                return match.group(1)
+        return ""
+
     def _parse_file_xml_content(self, content: str) -> dict[str, str] | None:
         if not content.strip().startswith("<file"):
             return None
@@ -1274,8 +1285,10 @@ class Bridge:
         img_path: str | None = None
         if msg_type == "image":
             img_path = self._download_image(
-                msg_id, content_obj.get("image_key", "")
+                msg_id, self._extract_image_key(content_obj, content_raw)
             )
+            if img_path:
+                self._cache_recent_file_path(chat_id, img_path)
             content = f"[图片] {img_path or ''}"
             self.msg_logger.info(f"Image downloaded: {img_path}")
         elif msg_type == "audio":

@@ -53,6 +53,21 @@ def make_post_event(chat_id="oc_1", sender="ou_1"):
     }
 
 
+def make_image_marker_event(chat_id="oc_1", sender="ou_1"):
+    return {
+        "event": {
+            "sender": {"sender_id": {"user_id": sender, "name": "tester"}},
+            "message": {
+                "message_id": "om_image",
+                "chat_type": "p2p",
+                "chat_id": chat_id,
+                "message_type": "image",
+                "content": "[Image: img_v3_marker]",
+            },
+        }
+    }
+
+
 def test_process_post_event_downloads_embedded_image_and_passes_path_to_claude(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     calls = []
@@ -70,6 +85,24 @@ def test_process_post_event_downloads_embedded_image_and_passes_path_to_claude(t
     assert ("download", "om_post", "img_v3_abc") in calls
     assert any(call[0] == "claude" and str(image_path) in call[1] for call in calls)
     assert any(call[0] == "claude" and "For images, inspect the local image directly" in call[1] for call in calls)
+
+
+def test_process_image_marker_event_downloads_image_key_from_lark_cli(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    calls = []
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(b"fake image")
+
+    monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: "r_1")
+    monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: True)
+    monkeypatch.setattr(bridge, "_download_image", lambda message_id, image_key: calls.append(("download", message_id, image_key)) or str(image_path))
+    monkeypatch.setattr(bridge, "_call_claude", lambda prompt, *args, **kwargs: calls.append(("claude", prompt)) or ("reply", "sid_1"))
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event(make_image_marker_event())
+
+    assert ("download", "om_image", "img_v3_marker") in calls
+    assert any(call[0] == "claude" and str(image_path) in call[1] for call in calls)
 
 
 def test_process_event_accepts_raw_sender_without_user_id(tmp_path, monkeypatch):
