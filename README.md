@@ -215,6 +215,14 @@ Windows 推荐使用前台窗口运行，便于观察日志：
 .\run_foreground.ps1 -Config config.toml -Profile qiao-test
 ```
 
+Windows 一键启动或重启：
+
+```powershell
+.\start_all.ps1
+.\start_all.ps1 -Restart
+.\start_all.ps1 -Restart -Foreground
+```
+
 查看状态：
 
 ```bash
@@ -484,6 +492,14 @@ On Windows, use one visible foreground window:
 
 ```powershell
 .\run_foreground.ps1 -Config config.toml -Profile qiao-test
+```
+
+One-command Windows start or restart:
+
+```powershell
+.\start_all.ps1
+.\start_all.ps1 -Restart
+.\start_all.ps1 -Restart -Foreground
 ```
 
 Status:

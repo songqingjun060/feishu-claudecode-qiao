@@ -123,6 +123,14 @@ Windows one-window foreground mode:
 .\run_foreground.ps1 -Config config.realtest.toml -Profile qiao-test
 ```
 
+Windows one-command start or restart:
+
+```powershell
+.\start_all.ps1
+.\start_all.ps1 -Restart
+.\start_all.ps1 -Restart -Foreground
+```
+
 Background on Windows PowerShell:
 
 ```powershell
