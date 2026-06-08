@@ -63,3 +63,14 @@ def test_build_prompt_uses_default_workspace_in_security_boundary(tmp_path):
     assert "Current chat workspace:" in prompt
     assert "D:/default-work" in prompt
     assert "User-authorized allowed_paths for this chat:\n- (none)" in prompt
+
+
+def test_build_prompt_includes_permission_profile_and_mode(tmp_path):
+    bridge = make_bridge(tmp_path)
+    rule = resolve_rule({"permission_profile": "admin"})
+
+    prompt = bridge._build_prompt("chat_a", "tester", "权限?", rule)
+
+    assert "Current chat permission:" in prompt
+    assert "permission_profile: admin" in prompt
+    assert "claude_permission_mode: bypassPermissions" in prompt

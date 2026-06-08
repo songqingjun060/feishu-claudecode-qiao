@@ -218,6 +218,15 @@ def test_natural_group_permission_rule_maps_to_permission_command(tmp_path):
     assert cmd.args == "set admin"
 
 
+def test_natural_group_approve_permission_maps_to_admin(tmp_path):
+    bridge = make_bridge(tmp_path)
+    cmd = bridge._natural_rule_command("\u6279\u51c6\u6743\u9650@\u6d4b\u8bd5", "group")
+
+    assert cmd is not None
+    assert cmd.name == "permission"
+    assert cmd.args == "set admin"
+
+
 def test_group_onboarding_mentions_paths_and_rules(tmp_path):
     bridge = make_bridge(tmp_path)
     reply = bridge._cmd_group_onboarding()

@@ -1468,6 +1468,9 @@ class Bridge:
         if permission_match:
             from .commands import Command
             return Command(name="permission", args=f"set {permission_match.group(1).lower()}", is_command=True)
+        if any(word in text for word in ("批准权限", "批权限", "最大权限", "授权", "批准")):
+            from .commands import Command
+            return Command(name="permission", args="set admin", is_command=True)
 
         if any(word in text for word in ("访问权限", "访问目录", "可访问", "放行", "允许访问")):
             candidates = extract_path_candidates(text)
@@ -1794,12 +1797,21 @@ class Bridge:
         workspace = effective_rule.get("workspace") or self.config.claude_work_dir or "(unset)"
         allowed_paths = self._allowed_paths_for_rule(effective_rule)
         allowed_lines = "\n".join(f"- {path}" for path in allowed_paths) if allowed_paths else "- (none)"
+        permission_profile = effective_rule.get("permission_profile", "")
+        permission_mode = permission_mode_for_profile(
+            permission_profile,
+            fallback=self.config.claude_permission_mode,
+        )
         return f"""<bridge_security_boundary>
 Current chat workspace:
 - {workspace}
 
 User-authorized allowed_paths for this chat:
 {allowed_lines}
+
+Current chat permission:
+- permission_profile: {permission_profile}
+- claude_permission_mode: {permission_mode}
 
 Rules:
 - Treat the current chat workspace, user-authorized allowed_paths, and bridge-supplied verified file paths as the only local paths the user has authorized for this conversation.
