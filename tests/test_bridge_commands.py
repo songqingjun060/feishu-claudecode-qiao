@@ -64,6 +64,7 @@ def test_cmd_permission_show(tmp_path):
     rule = resolve_rule({"permission_profile": "dev"})
     reply = bridge._cmd_permission("c1", "", rule)
     assert "dev" in reply
+    assert "开发" in reply
 
 
 def test_cmd_workspace_set_and_clear(tmp_path):
@@ -225,6 +226,26 @@ def test_natural_group_approve_permission_maps_to_admin(tmp_path):
     assert cmd is not None
     assert cmd.name == "permission"
     assert cmd.args == "set admin"
+
+
+def test_cmd_permission_set_returns_chinese_label(tmp_path):
+    bridge = make_bridge(tmp_path)
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+
+    reply = bridge._cmd_permission("c1", "set admin", resolve_rule({}))
+
+    assert "admin" in reply
+    assert "最大权限" in reply
+
+
+def test_cmd_rules_returns_chinese_permission_label(tmp_path):
+    bridge = make_bridge(tmp_path)
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+
+    reply = bridge._cmd_rules(resolve_rule({"permission_profile": "admin"}))
+
+    assert "admin" in reply
+    assert "最大权限" in reply
 
 
 def test_group_onboarding_mentions_paths_and_rules(tmp_path):

@@ -1619,17 +1619,27 @@ class Bridge:
         lines.extend(f"- {path}" for path in accepted)
         return "\n".join(lines)
 
+    def _permission_label(self, profile: str) -> str:
+        labels = {
+            "readonly": "只读",
+            "safe": "安全",
+            "dev": "开发",
+            "admin": "最大权限",
+            "stateless": "无上下文",
+        }
+        return f"{profile}（{labels.get(profile, '未知')}）"
+
     def _cmd_permission(self, chat_id: str, args: str, effective_rule: EffectiveRule, *, can_modify: bool = True) -> str:
         if not args:
-            return f"当前 permission_profile: {effective_rule.get('permission_profile')}"
+            return f"当前 permission_profile: {self._permission_label(effective_rule.get('permission_profile'))}"
         action, _, value = args.partition(" ")
         value = value.strip()
         if action == "set" and value in {"readonly", "safe", "dev", "admin", "stateless"}:
             if not can_modify:
                 return "拒绝修改规则：你没有当前聊天的规则管理权限。"
             self.chat_rules.set(chat_id, permission_profile=value)
-            return f"已设置 permission_profile: {value}"
-        return "用法: /permission | /permission set <readonly|safe|dev|admin|stateless>"
+            return f"已设置 permission_profile: {self._permission_label(value)}"
+        return "用法: /permission | /permission set <readonly|safe|dev|admin|stateless>\n档位: readonly（只读）, safe（安全）, dev（开发）, admin（最大权限）, stateless（无上下文）"
 
     def _cmd_help(self) -> str:
         return """可用命令：
@@ -1648,7 +1658,7 @@ class Bridge:
 常用设置：
 /workspace set D:/项目目录
 /paths add D:/资料目录, E:/共享目录
-/permission set admin
+/permission set admin  # 最大权限
 /rules"""
 
     def _cmd_group_onboarding(self) -> str:
@@ -1664,7 +1674,7 @@ class Bridge:
 /paths add D:/资料目录, E:/共享目录
 
 设置 Claude Code 权限档位：
-/permission set admin
+/permission set admin  # 最大权限
 
 说明：
 - workspace 是 Claude Code 的当前工作目录。
@@ -1674,9 +1684,10 @@ class Bridge:
     def _cmd_rules(self, effective_rule) -> str:
         allowed_paths = effective_rule.get("allowed_paths") or []
         allowed_text = "\n".join(f"  - {path}" for path in allowed_paths) if allowed_paths else "  - (未设置)"
+        permission_profile = effective_rule.get("permission_profile")
         return f"""当前规则：
 - session_mode: {effective_rule.get('session_mode')}
-- permission_profile: {effective_rule.get('permission_profile')}
+- permission_profile: {self._permission_label(permission_profile)}
 - workspace: {effective_rule.get('workspace') or '(未设置)'}
 - allowed_paths:
 {allowed_text}
