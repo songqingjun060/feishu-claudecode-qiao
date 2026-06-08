@@ -1322,13 +1322,15 @@ class Bridge:
                 self._cache_recent_file_path(chat_id, file_info)
             content = f"[文件] {file_info or ''}"
         elif msg_type == "post":
-            image_key = self._extract_post_image_key(content_obj)
+            image_key = self._extract_post_image_key(content_obj) or self._extract_image_key(content_obj, content_raw)
             if image_key:
                 img_path = self._download_image(msg_id, image_key)
                 if img_path:
                     self._cache_recent_file_path(chat_id, img_path)
                 self.msg_logger.info(f"Post image downloaded: {img_path}")
             post_text = self._extract_post_text(content_obj)
+            if not post_text and isinstance(content_raw, str):
+                post_text = re.sub(r"\[Image:\s*[^\]\s]+\]", "", content_raw).strip()
             content = post_text or "[富文本消息]"
             if img_path:
                 content = f"{content}\n[图片] {img_path}"
