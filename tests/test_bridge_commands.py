@@ -74,6 +74,7 @@ def test_cmd_workspace_set_and_clear(tmp_path):
     reply = bridge._cmd_workspace("c1", f"set {ws}", resolve_rule({}))
     assert "已设置" in reply
     assert str(ws) in reply
+    assert bridge.chat_rules.get("c1")["allowed_paths"] == [str(ws.resolve())]
     reply = bridge._cmd_workspace("c1", "clear", resolve_rule({}))
     assert "已清空" in reply
 
@@ -157,3 +158,46 @@ def test_cmd_workspace_set_denied_for_group_member(tmp_path):
         "c1", f"set {ws}", rule, can_modify=False,
     )
     assert "拒绝修改规则" in reply
+
+
+
+def test_cmd_paths_adds_multiple_directories(tmp_path):
+    bridge = make_bridge(tmp_path)
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+
+    reply = bridge._cmd_paths("c1", f"add {a}, {b}", resolve_rule({}))
+
+    assert str(a.resolve()) in reply
+    assert str(b.resolve()) in reply
+    assert bridge.chat_rules.get("c1")["allowed_paths"] == [str(a.resolve()), str(b.resolve())]
+
+
+def test_natural_group_access_rule_maps_drive_to_paths_command(tmp_path):
+    bridge = make_bridge(tmp_path)
+    cmd = bridge._natural_rule_command("\u6b64\u7fa4\u8bbf\u95ee\u6743\u9650\u8bbe\u7f6e\u4e3aD\u76d8", "group")
+
+    assert cmd is not None
+    assert cmd.name == "paths"
+    assert cmd.args == "add D:/"
+
+
+def test_natural_group_permission_rule_maps_to_permission_command(tmp_path):
+    bridge = make_bridge(tmp_path)
+    cmd = bridge._natural_rule_command("\u6b64\u7fa4\u6743\u9650\u8bbe\u4e3aadmin", "group")
+
+    assert cmd is not None
+    assert cmd.name == "permission"
+    assert cmd.args == "set admin"
+
+
+def test_group_onboarding_mentions_paths_and_rules(tmp_path):
+    bridge = make_bridge(tmp_path)
+    reply = bridge._cmd_group_onboarding()
+
+    assert "/rules" in reply
+    assert "/paths add" in reply
+    assert "/workspace set" in reply

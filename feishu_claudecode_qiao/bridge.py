@@ -1115,9 +1115,10 @@ class Bridge:
                 return
 
         # Resolve rules
+        rule_exists = self.chat_rules.exists(chat_id)
         chat_rule = self.chat_rules.get(chat_id)
         effective_rule = resolve_rule(chat_rule, sender_id=sender)
-        if chat_type != "group" and not self.chat_rules.exists(chat_id):
+        if chat_type != "group" and not rule_exists:
             effective_rule = resolve_rule(
                 chat_rule,
                 sender_id=sender,
@@ -1252,10 +1253,27 @@ class Bridge:
 
         # Handle commands
         cmd = parse_command(content)
+        if not cmd.is_command:
+            cmd = self._natural_rule_command(content, chat_type) or cmd
         if cmd.is_command:
             command_reply = self._handle_command(cmd, effective_rule, session_key, chat_id, sender, sender_name, chat_rule, chat_type)
             self._send_event_reply(chat_id, command_reply, "text", chat_type, msg_id, sender, sender_name)
             return
+
+        onboarding_requested = cmd.is_command or any(
+            word in content for word in ("规则", "设置", "权限", "命令", "帮助", "workspace", "allowed_paths")
+        )
+        if chat_type == "group" and onboarding_requested and not rule_exists and not chat_rule.get("onboarding_shown"):
+            self.chat_rules.set(chat_id, onboarding_shown=True)
+            self._send_event_reply(
+                chat_id,
+                self._cmd_group_onboarding(),
+                "text",
+                chat_type,
+                msg_id,
+                sender,
+                sender_name,
+            )
 
         content = self._append_verified_path_context(content, allowed_path_candidates)
 
@@ -1439,6 +1457,32 @@ class Bridge:
             return sender in bot_admins
         return bool(self.config.bridge_bot_owner_id) and sender == self.config.bridge_bot_owner_id
 
+    def _natural_rule_command(self, content: str, chat_type: str):
+        if chat_type != "group":
+            return None
+        text = content.strip()
+        if not text or text.startswith("/"):
+            return None
+
+        permission_match = re.search(r"(?:权限|permission).*?(readonly|safe|dev|admin|stateless)", text, re.IGNORECASE)
+        if permission_match:
+            from .commands import Command
+            return Command(name="permission", args=f"set {permission_match.group(1).lower()}", is_command=True)
+
+        if any(word in text for word in ("访问权限", "访问目录", "可访问", "放行", "允许访问")):
+            candidates = extract_path_candidates(text)
+            drive_match = re.search(r"([A-Za-z])\s*盘", text)
+            if drive_match:
+                candidates.append(f"{drive_match.group(1).upper()}:/")
+            if candidates:
+                from .commands import Command
+                unique = []
+                for candidate in candidates:
+                    if candidate not in unique:
+                        unique.append(candidate)
+                return Command(name="paths", args="add " + ", ".join(unique), is_command=True)
+        return None
+
     def _handle_command(self, cmd, effective_rule, session_key, chat_id, sender, sender_name, chat_rule, chat_type=""):
         if cmd.name == "help":
             return self._cmd_help()
@@ -1466,6 +1510,11 @@ class Bridge:
                 chat_id, cmd.args, effective_rule,
                 can_modify=self._can_modify_chat_rule(effective_rule, sender, chat_type),
             )
+        elif cmd.name == "paths":
+            return self._cmd_paths(
+                chat_id, cmd.args, effective_rule,
+                can_modify=self._can_modify_chat_rule(effective_rule, sender, chat_type),
+            )
         elif cmd.name == "permission":
             return self._cmd_permission(
                 chat_id, cmd.args, effective_rule,
@@ -1490,14 +1539,75 @@ class Bridge:
             if not check.allowed:
                 return f"拒绝设置 workspace：{check.reason}"
 
-            self.chat_rules.set(chat_id, workspace=str(target))
-            return f"已设置 workspace: {target}"
+            self.chat_rules.set(chat_id, workspace=str(target), allowed_paths=[str(target)])
+            return f"已设置 workspace 并放行路径: {target}"
         if action == "clear":
             if not can_modify:
                 return "拒绝修改规则：你没有当前聊天的规则管理权限。"
             self.chat_rules.set(chat_id, workspace="")
             return "已清空 workspace。"
         return "用法: /workspace | /workspace set <path> | /workspace clear"
+
+    def _split_path_args(self, value: str) -> list[str]:
+        return [item.strip().strip('"') for item in re.split(r"[\n,;，；]+", value) if item.strip()]
+
+    def _validate_rule_path(self, value: str) -> tuple[Path | None, str]:
+        target = Path(value.strip()).expanduser().resolve()
+        if not target.exists():
+            return None, f"路径不存在: {target}"
+        if not target.is_dir():
+            return None, f"路径不是目录: {target}"
+        check = self.security.explain_path(target)
+        if not check.allowed:
+            return None, f"路径不允许: {check.reason}"
+        return target, ""
+
+    def _cmd_paths(self, chat_id: str, args: str, effective_rule: EffectiveRule, *, can_modify: bool = True) -> str:
+        current = [str(p) for p in (effective_rule.get("allowed_paths", []) or []) if str(p).strip()]
+        if not args:
+            if not current:
+                return "当前 allowed_paths: (未设置)\n用法: /paths add <目录1>, <目录2> | /paths set <目录1>, <目录2> | /paths clear"
+            lines = ["当前 allowed_paths:"]
+            lines.extend(f"- {path}" for path in current)
+            return "\n".join(lines)
+
+        action, _, value = args.partition(" ")
+        action = action.strip().lower()
+        if action == "clear":
+            if not can_modify:
+                return "拒绝修改规则：你没有当前聊天的规则管理权限。"
+            self.chat_rules.set(chat_id, allowed_paths=[])
+            return "已清空 allowed_paths。"
+
+        if action not in {"add", "set"} or not value.strip():
+            return "用法: /paths add <目录1>, <目录2> | /paths set <目录1>, <目录2> | /paths clear"
+        if not can_modify:
+            return "拒绝修改规则：你没有当前聊天的规则管理权限。"
+
+        accepted: list[str] = []
+        errors: list[str] = []
+        for raw in self._split_path_args(value):
+            target, error = self._validate_rule_path(raw)
+            if target is None:
+                errors.append(error)
+                continue
+            path_str = str(target)
+            if path_str not in accepted:
+                accepted.append(path_str)
+
+        if errors:
+            return "路径设置失败：\n" + "\n".join(f"- {error}" for error in errors)
+        if action == "add":
+            merged = list(current)
+            for path_str in accepted:
+                if path_str not in merged:
+                    merged.append(path_str)
+            accepted = merged
+
+        self.chat_rules.set(chat_id, allowed_paths=accepted)
+        lines = ["已设置 allowed_paths:"]
+        lines.extend(f"- {path}" for path in accepted)
+        return "\n".join(lines)
 
     def _cmd_permission(self, chat_id: str, args: str, effective_rule: EffectiveRule, *, can_modify: bool = True) -> str:
         if not args:
@@ -1522,13 +1632,44 @@ class Bridge:
 /reset - 重置当前会话
 /compact - 强制生成交接摘要
 /workspace - 查看或设置当前聊天工作目录
-/permission - 查看或设置当前聊天权限档位"""
+/paths - 查看或设置当前聊天可访问目录，可添加多个
+/permission - 查看或设置当前聊天权限档位
+
+常用设置：
+/workspace set D:/项目目录
+/paths add D:/资料目录, E:/共享目录
+/permission set admin
+/rules"""
+
+    def _cmd_group_onboarding(self) -> str:
+        return """本群还没有配置访问规则。请先由机器人管理员或机器人拥有者设置后再使用。
+
+查看当前规则：
+/rules
+
+设置工作目录，并自动放行该目录：
+/workspace set D:/项目目录
+
+额外放行多个目录：
+/paths add D:/资料目录, E:/共享目录
+
+设置 Claude Code 权限档位：
+/permission set admin
+
+说明：
+- workspace 是 Claude Code 的当前工作目录。
+- allowed_paths 可以有多个，用 /paths add 或 /paths set 管理。
+- 群规则只对当前群生效。"""
 
     def _cmd_rules(self, effective_rule) -> str:
+        allowed_paths = effective_rule.get("allowed_paths") or []
+        allowed_text = "\n".join(f"  - {path}" for path in allowed_paths) if allowed_paths else "  - (未设置)"
         return f"""当前规则：
 - session_mode: {effective_rule.get('session_mode')}
 - permission_profile: {effective_rule.get('permission_profile')}
 - workspace: {effective_rule.get('workspace') or '(未设置)'}
+- allowed_paths:
+{allowed_text}
 - custom_prompt: {'(已设置)' if effective_rule.get('custom_prompt') else '(未设置)'}"""
 
     def _cmd_context(self, session_key: str | None) -> str:

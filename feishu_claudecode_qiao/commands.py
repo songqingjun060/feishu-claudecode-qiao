@@ -18,6 +18,7 @@ SUPPORTED_COMMANDS = {
     "new",
     "reset",
     "workspace",
+    "paths",
     "permission",
     "ask",
 }
