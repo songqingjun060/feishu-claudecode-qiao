@@ -1522,10 +1522,16 @@ class Bridge:
             )
         return f"未知命令: /{cmd.name}"
 
+    def _strip_trailing_mentions(self, value: str) -> str:
+        value = re.sub(r"\s+@_user_\d+\s*$", "", value.strip())
+        value = re.sub(r"\s+@[^\s,;，；]+\s*$", "", value).strip()
+        return value
+
     def _cmd_workspace(self, chat_id: str, args: str, effective_rule: EffectiveRule, *, can_modify: bool = True) -> str:
         if not args:
             return f"当前 workspace: {effective_rule.get('workspace') or self.config.claude_work_dir or '(未设置)'}"
         action, _, value = args.partition(" ")
+        value = self._strip_trailing_mentions(value)
         if action == "set" and value.strip():
             if not can_modify:
                 return "拒绝修改规则：你没有当前聊天的规则管理权限。"
@@ -1549,6 +1555,7 @@ class Bridge:
         return "用法: /workspace | /workspace set <path> | /workspace clear"
 
     def _split_path_args(self, value: str) -> list[str]:
+        value = self._strip_trailing_mentions(value)
         return [item.strip().strip('"') for item in re.split(r"[\n,;，；]+", value) if item.strip()]
 
     def _validate_rule_path(self, value: str) -> tuple[Path | None, str]:

@@ -176,6 +176,30 @@ def test_cmd_paths_adds_multiple_directories(tmp_path):
     assert bridge.chat_rules.get("c1")["allowed_paths"] == [str(a.resolve()), str(b.resolve())]
 
 
+def test_cmd_paths_ignores_trailing_bot_mention(tmp_path):
+    bridge = make_bridge(tmp_path)
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    target = tmp_path / "storage"
+    target.mkdir()
+
+    reply = bridge._cmd_paths("c1", f"add {target} @??", resolve_rule({}))
+
+    assert str(target.resolve()) in reply
+    assert "@??" not in bridge.chat_rules.get("c1")["allowed_paths"][0]
+
+
+def test_cmd_workspace_ignores_trailing_bot_mention(tmp_path):
+    bridge = make_bridge(tmp_path)
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    target = tmp_path / "workspace"
+    target.mkdir()
+
+    reply = bridge._cmd_workspace("c1", f"set {target} @??", resolve_rule({}))
+
+    assert str(target.resolve()) in reply
+    assert bridge.chat_rules.get("c1")["workspace"] == str(target.resolve())
+
+
 def test_natural_group_access_rule_maps_drive_to_paths_command(tmp_path):
     bridge = make_bridge(tmp_path)
     cmd = bridge._natural_rule_command("\u6b64\u7fa4\u8bbf\u95ee\u6743\u9650\u8bbe\u7f6e\u4e3aD\u76d8", "group")
