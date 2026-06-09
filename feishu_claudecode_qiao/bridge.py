@@ -258,6 +258,25 @@ class Bridge:
             "uploaded": uploaded,
         }
 
+    def _cache_recent_file_message(
+        self,
+        chat_id: str,
+        message_id: str,
+        content_obj: dict[str, Any],
+        sender: str = "",
+    ) -> str:
+        if not chat_id or not message_id or not isinstance(content_obj, dict):
+            return ""
+        file_path = self._process_file(message_id, content_obj)
+        if file_path:
+            self._cache_recent_file_path(chat_id, file_path)
+            recent = self._recent_files_by_chat.get(chat_id)
+            if recent is not None:
+                recent["message_id"] = message_id
+                recent["sender"] = sender
+                recent["file_name"] = content_obj.get("file_name", "")
+        return file_path or ""
+
     def _cache_recent_files_from_text(
         self,
         chat_id: str,
@@ -682,6 +701,8 @@ class Bridge:
 
     def _wants_recent_file_context(self, content: str) -> bool:
         text = content.lower()
+        if self._is_bare_mention(content):
+            return True
         action_words = (
             "\u5206\u6790",
             "\u770b",
@@ -704,6 +725,16 @@ class Bridge:
             "document",
             "attachment",
         )
+        task_words = (
+            "\u7269\u6d41\u7801",
+            "\u67e5\u8be2",
+            "\u8868\u683c",
+            "excel",
+            "xlsx",
+            "xls",
+        )
+        if any(word in text for word in task_words):
+            return True
         return any(word in text for word in action_words) and any(
             word in text for word in file_words
         )
@@ -1034,6 +1065,9 @@ class Bridge:
         if msg_type == "audio":
             if isinstance(content_obj, dict):
                 self._cache_recent_audio(chat_id, msg_id, content_obj, sender)
+        elif msg_type == "file":
+            if isinstance(content_obj, dict):
+                self._cache_recent_file_message(chat_id, msg_id, content_obj, sender)
 
         if chat_type == "group" and self.config.bridge_require_mention_in_group:
             bot_name = self.config.bridge_bot_display_name or "bot"
@@ -1317,7 +1351,9 @@ class Bridge:
             else:
                 content = "[语音消息]"
         elif msg_type == "file":
-            file_info = self._process_file(msg_id, content_obj)
+            recent = self._recent_files_by_chat.get(chat_id)
+            recent_files = [str(path) for path in (recent or {}).get("files", [])]
+            file_info = recent_files[-1] if recent_files else self._process_file(msg_id, content_obj)
             if file_info:
                 self._cache_recent_file_path(chat_id, file_info)
             content = f"[文件] {file_info or ''}"

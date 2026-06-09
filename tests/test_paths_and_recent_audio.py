@@ -443,6 +443,111 @@ def test_followup_analysis_uses_recent_uploaded_file_context(tmp_path, monkeypat
     assert "Do not rely on pdftoppm as the first option" in prompts[-1]
 
 
+def test_unmentioned_group_file_is_cached_when_event_arrives(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    saved = tmp_path / "codes.xlsx"
+    saved.write_text("xlsx", encoding="utf-8")
+
+    monkeypatch.setattr(bridge, "_process_file", lambda msg_id, content_obj: str(saved))
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Claude should not be called")
+        ),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_reply",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("reply should not be sent")
+        ),
+    )
+
+    bridge._process_event(
+        make_event(
+            msg_type="file",
+            content_obj={"file_key": "file_v3_abc", "file_name": "codes.xlsx"},
+            mentions=[],
+            message_id="om_file_1",
+        )
+    )
+
+    cached = bridge._recent_files_by_chat["oc_1"]
+    assert cached["files"] == [str(saved.resolve())]
+
+
+def test_bare_mention_after_group_file_uses_cached_file_context(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    saved = tmp_path / "codes.xlsx"
+    saved.write_text("xlsx", encoding="utf-8")
+    prompts = []
+
+    monkeypatch.setattr(bridge, "_process_file", lambda msg_id, content_obj: str(saved))
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("ok", "sid_1"),
+    )
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event(
+        make_event(
+            msg_type="file",
+            content_obj={"file_key": "file_v3_abc", "file_name": "codes.xlsx"},
+            mentions=[],
+            message_id="om_file_1",
+        )
+    )
+    bridge._process_event(
+        make_event(
+            msg_type="text",
+            content_obj={"text": "@_user_1"},
+            mentions=bot_mention(),
+            message_id="om_text_1",
+        )
+    )
+
+    assert str(saved.resolve()) in prompts[-1]
+    assert "bridge_recent_file" in prompts[-1]
+    assert "openpyxl or pandas" in prompts[-1]
+
+
+def test_followup_bi_query_after_group_file_uses_cached_file_context(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    saved = tmp_path / "codes.xlsx"
+    saved.write_text("xlsx", encoding="utf-8")
+    prompts = []
+
+    monkeypatch.setattr(bridge, "_process_file", lambda msg_id, content_obj: str(saved))
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("ok", "sid_1"),
+    )
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event(
+        make_event(
+            msg_type="file",
+            content_obj={"file_key": "file_v3_abc", "file_name": "codes.xlsx"},
+            mentions=[],
+            message_id="om_file_1",
+        )
+    )
+    bridge._process_event(
+        make_event(
+            msg_type="text",
+            content_obj={"text": "@_user_1 BI物流码查询"},
+            mentions=bot_mention(),
+            message_id="om_text_1",
+        )
+    )
+
+    assert str(saved.resolve()) in prompts[-1]
+    assert "bridge_recent_file" in prompts[-1]
+
+
 def test_p2p_uses_admin_permission_profile_by_default(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     permission_modes = []
