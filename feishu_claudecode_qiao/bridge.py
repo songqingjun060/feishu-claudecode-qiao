@@ -699,6 +699,35 @@ class Bridge:
             and any(word in text for word in file_words)
         )
 
+    def _is_new_table_generation_intent(self, content: str) -> bool:
+        text = content.lower()
+        transform_words = (
+            "\u6c47\u603b",
+            "\u6574\u7406",
+            "\u5408\u5e76",
+            "\u91cd\u65b0",
+            "\u6700\u65b0",
+            "\u65b0\u8868",
+            "\u65b0\u7248",
+            "\u66f4\u65b0",
+            "summarize",
+            "merge",
+            "regenerate",
+            "latest",
+            "new",
+            "updated",
+        )
+        table_words = (
+            "\u8868\u683c",
+            "excel",
+            "xlsx",
+            "xls",
+            "csv",
+        )
+        return any(word in text for word in transform_words) and any(
+            word in text for word in table_words
+        )
+
     def _wants_recent_file_context(self, content: str) -> bool:
         text = content.lower()
         if self._is_bare_mention(content):
@@ -864,6 +893,8 @@ class Bridge:
         user_content: str,
         effective_security: SecurityPolicy,
     ) -> str:
+        if self._is_new_table_generation_intent(user_content):
+            return ""
         if not self._is_recent_generated_file_upload_intent(user_content):
             return ""
         recent = self._recent_files_by_chat.get(chat_id)
@@ -892,6 +923,8 @@ class Bridge:
         user_content: str,
         effective_security: SecurityPolicy,
     ) -> str:
+        if self._is_new_table_generation_intent(user_content):
+            return ""
         if not self._is_recent_generated_file_upload_intent(user_content):
             return ""
         recent = self._recent_files_by_chat.get(chat_id)

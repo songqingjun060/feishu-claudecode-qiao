@@ -341,6 +341,54 @@ def test_followup_uploads_recent_generated_excel_from_previous_reply(tmp_path, m
     assert replies[-1] == ("\u521a\u624d\u5df2\u4e0a\u4f20\u6587\u4ef6\uff1abi-result.xlsx", "text")
 
 
+def test_followup_summary_table_request_calls_claude_instead_of_reuploading(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    old_file = tmp_path / "bi-result-old.xlsx"
+    old_file.write_text("old", encoding="utf-8")
+    new_file = tmp_path / "bi-result-summary.xlsx"
+    new_file.write_text("new", encoding="utf-8")
+    sent_files = []
+    replies = []
+    prompts = []
+
+    bridge._cache_recent_file_path("oc_1", str(old_file), uploaded=True)
+
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt)
+        or (f"已汇总为最新表格: `{new_file}`", "sid_1"),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_local_file",
+        lambda chat_id, path, reply_to_message_id="": sent_files.append(
+            (chat_id, path, reply_to_message_id)
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_event_reply",
+        lambda chat_id, content, msg_type, chat_type, msg_id, sender, sender_name: replies.append(
+            (content, msg_type)
+        )
+        or True,
+    )
+
+    bridge._process_event_body(
+        make_event(
+            content_obj={"text": "@_user_1 汇总为最新表格发出来"},
+            mentions=bot_mention(),
+            message_id="om_summary",
+        )
+    )
+
+    assert len(prompts) == 1
+    assert sent_files == [("oc_1", str(new_file.resolve()), "om_summary")]
+    assert "刚才已上传文件" not in "".join(content for content, _ in replies)
+
+
 def test_bi_query_generated_excel_is_uploaded_immediately(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     target = tmp_path / "bi-result.xlsx"
