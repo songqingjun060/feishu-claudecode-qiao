@@ -123,6 +123,8 @@ Windows one-command start or restart:
 .\start_all.ps1 -Restart -Foreground
 ```
 
+While the bridge is running, it periodically checks only the WebSocket subscriber PID. If `feishu_ws.pid` is missing or the recorded process no longer exists, the bridge starts the subscriber again with `bridge.ws_profile`. The bridge process itself is not restarted by this watchdog.
+
 Background on Windows PowerShell:
 
 ```powershell

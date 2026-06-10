@@ -1,4 +1,6 @@
 import json
+import os
+import sys
 from pathlib import Path
 
 from feishu_claudecode_qiao.bridge import Bridge
@@ -21,6 +23,67 @@ def test_bridge_paths_use_configured_data_dir(tmp_path):
     assert bridge.ws_events_file == data_dir.resolve() / "logs" / "feishu_ws_events.jsonl"
     assert bridge.images_dir == data_dir.resolve() / "images"
     assert bridge.attachments_dir == data_dir.resolve() / "attachments"
+
+
+def test_websocket_watchdog_starts_subscriber_when_pid_missing(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+            bridge_ws_profile="qiao-test",
+        ),
+        config_path=config_path,
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        "feishu_claudecode_qiao.bridge.subprocess.run",
+        lambda args, **kwargs: calls.append((args, kwargs))
+        or type("Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""})(),
+    )
+
+    bridge._check_websocket_watchdog(force=True)
+
+    assert calls
+    args = calls[0][0]
+    assert args[:3] == [
+        sys.executable,
+        str(Path(__file__).resolve().parents[1] / "start_ws.py"),
+        "start",
+    ]
+    assert "--config" in args
+    assert str(config_path) in args
+    assert "--profile" in args
+    assert "qiao-test" in args
+
+
+def test_websocket_watchdog_does_not_start_when_pid_running(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    pid_file = tmp_path / "feishu_ws.pid"
+    pid_file.write_text(str(os.getpid()), encoding="utf-8")
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+            bridge_ws_profile="qiao-test",
+        ),
+        config_path=config_path,
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        "feishu_claudecode_qiao.bridge.subprocess.run",
+        lambda *args, **kwargs: calls.append(args),
+    )
+
+    bridge._check_websocket_watchdog(force=True)
+
+    assert calls == []
 
 
 def test_pid_helpers_use_given_path(tmp_path):
