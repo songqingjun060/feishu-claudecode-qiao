@@ -33,6 +33,13 @@ DEFAULT_RULE = {
         "rollover_cooldown_hours": 2,
         "carry_summary": True,
     },
+    "memory_policy": {
+        "enabled": True,
+        "rolling_summary_max_chars": 6000,
+        "history_max_items": 50,
+        "history_item_max_chars": 4000,
+        "inject_max_chars": 4000,
+    },
     "output_policy": {
         "verbosity": "normal",
         "long_reply_mode": "summary_then_file",

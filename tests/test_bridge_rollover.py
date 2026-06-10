@@ -39,7 +39,7 @@ def test_maybe_rollover_force_triggers_call(tmp_path, monkeypatch):
     rule = resolve_rule({})
     result = bridge._maybe_rollover_session("chat:c1", rule, force=True)
     assert called
-    assert "交接摘要" in result
+    assert "<chat_memory>" in result
     assert "summary text" in result
 
 
@@ -68,6 +68,36 @@ def test_rollover_current_message_uses_new_session_and_carries_summary(tmp_path,
     assert "handoff summary" in calls[1][0]
     assert reply == "final reply"
     assert new_session == "new_sid"
+
+
+def test_rollover_updates_chat_memory_and_injects_it_next_turn(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "old_sid")
+    bridge.session_store.record_turn("chat:c1", 10, 20)
+    calls = []
+
+    def fake_call(prompt, sid, **kwargs):
+        calls.append((prompt, sid))
+        if "交接摘要" in prompt or "handoff" in prompt.lower():
+            return ("当前段摘要：用户偏好BI物流码表格。", sid)
+        return ("滚动长期记忆：该 chat 主要处理 BI 物流码查询，偏好直接上传 Excel。", sid)
+
+    monkeypatch.setattr(bridge, "_call_claude", fake_call)
+
+    rule = resolve_rule({})
+    bridge._maybe_rollover_session("chat:c1", rule, force=True)
+    meta = bridge.session_store.get("chat:c1")
+    prompt = bridge._build_prompt(
+        "c1",
+        "tester",
+        bridge._memory_context_for_prompt("chat:c1", rule) + "\n\n继续查询",
+        rule,
+    )
+
+    assert meta.memory["rolling_summary"]
+    assert meta.memory_history
+    assert "<chat_memory>" in prompt
+    assert "BI物流码" in prompt
 
 
 def test_process_event_retries_when_saved_claude_session_is_missing(tmp_path, monkeypatch):

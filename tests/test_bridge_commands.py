@@ -50,6 +50,35 @@ def test_cmd_summary_empty(tmp_path):
     assert "没有保存" in reply
 
 
+def test_parse_memory_command():
+    from feishu_claudecode_qiao.commands import parse_command
+    cmd = parse_command("/memory history")
+    assert cmd.is_command
+    assert cmd.name == "memory"
+    assert cmd.args == "history"
+
+
+def test_cmd_memory_show_and_clear(tmp_path):
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sess_1")
+    bridge.session_store.archive_and_rollover(
+        "chat:c1",
+        "segment summary",
+        "sess_1",
+        rolling_summary="chat role memory",
+    )
+    bridge.session_store.update_session_id("chat:c1", "sess_2")
+
+    reply = bridge._cmd_memory("chat:c1", "")
+    assert "chat role memory" in reply
+
+    reply = bridge._cmd_memory("chat:c1", "clear")
+    assert "清空" in reply
+    meta = bridge.session_store.get("chat:c1")
+    assert meta.session_id == "sess_2"
+    assert meta.memory["rolling_summary"] == ""
+
+
 def test_cmd_workspace_show(tmp_path):
     bridge = make_bridge(tmp_path)
     from feishu_claudecode_qiao.rule_engine import resolve_rule

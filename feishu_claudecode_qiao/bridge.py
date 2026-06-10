@@ -1421,6 +1421,10 @@ class Bridge:
 
         content = self._append_verified_path_context(content, allowed_path_candidates)
 
+        memory_context = self._memory_context_for_prompt(session_key, effective_rule)
+        if memory_context:
+            content += memory_context
+
         recent_audio_context = self._recent_audio_context(chat_id, content, sender)
         if recent_audio_context:
             content += recent_audio_context
@@ -1643,6 +1647,8 @@ class Bridge:
             return self._cmd_context(session_key)
         elif cmd.name == "summary":
             return self._cmd_summary(session_key)
+        elif cmd.name == "memory":
+            return self._cmd_memory(session_key, cmd.args)
         elif cmd.name == "ask":
             return self._cmd_ask(chat_id, sender, sender_name, cmd.args, chat_rule)
         elif cmd.name == "reset":
@@ -1795,6 +1801,9 @@ class Bridge:
 /rules - 查看当前规则
 /context - 查看会话上下文状态
 /summary - 查看交接摘要
+/memory - 查看当前对话长期记忆
+/memory history - 查看最近长期记忆历史
+/memory clear - 清空当前对话长期记忆
 /ask <问题> - 单次无历史问答
 /new - 开启新会话
 /reset - 重置当前会话
@@ -1859,6 +1868,30 @@ class Bridge:
             return "当前没有保存的交接摘要。"
         return f"交接摘要：\n{meta.summary[:500]}..."
 
+    def _cmd_memory(self, session_key: str | None, args: str) -> str:
+        if not session_key:
+            return "当前为无状态模式，无长期记忆。"
+        action = (args or "").strip().lower()
+        if action == "clear":
+            self.session_store.clear_memory(session_key)
+            return "已清空当前对话长期记忆。"
+        meta = self.session_store.get(session_key)
+        memory = (meta.memory or {}).get("rolling_summary", "")
+        if action == "history":
+            history = meta.memory_history or []
+            if not history:
+                return "当前没有长期记忆历史。"
+            lines = ["长期记忆历史："]
+            for item in history[-5:]:
+                created = item.get("created_at", "")
+                summary = str(item.get("summary", ""))[:300]
+                lines.append(f"- {created}: {summary}")
+            return "\n".join(lines)
+        if not memory:
+            return "当前没有长期记忆。"
+        version = (meta.memory or {}).get("version", 0)
+        return f"长期记忆 v{version}：\n{memory[:1000]}"
+
     def _cmd_ask(self, chat_id, sender, sender_name, content, chat_rule):
         temporary = {"session_mode": "stateless"}
         effective_rule = resolve_rule(chat_rule, sender_id=sender, temporary=temporary)
@@ -1900,8 +1933,72 @@ class Bridge:
         effective_workspace = effective_rule.get("workspace") or self.config.claude_work_dir
         summary, _ = self._call_claude(summary_prompt, old_session_id, cwd=effective_workspace)
 
-        self.session_store.archive_and_rollover(session_key, summary, old_session_id)
-        return f"\n\n以下是上一段 Claude Code session 的交接摘要...\n<session_summary>\n{summary}\n</session_summary>"
+        memory_summary = self._update_chat_memory(session_key, summary, effective_rule, effective_workspace)
+
+        memory_policy = effective_rule.get("memory_policy", {}) or {}
+        self.session_store.archive_and_rollover(
+            session_key,
+            summary,
+            old_session_id,
+            rolling_summary=memory_summary,
+            history_limit=int(memory_policy.get("history_max_items", 50)),
+            history_item_max_chars=int(memory_policy.get("history_item_max_chars", 4000)),
+        )
+        carried = memory_summary or summary
+        return f"\n\n以下是当前对话框的长期记忆，请用于保持角色、偏好和历史连续性...\n<chat_memory>\n{carried}\n</chat_memory>"
+
+    def _update_chat_memory(
+        self,
+        session_key: str,
+        current_summary: str,
+        effective_rule,
+        effective_workspace: str,
+    ) -> str:
+        memory_policy = effective_rule.get("memory_policy", {}) or {}
+        if memory_policy.get("enabled", True) is False:
+            return current_summary
+        max_chars = int(memory_policy.get("rolling_summary_max_chars", 6000))
+        meta = self.session_store.get(session_key)
+        previous_memory = (meta.memory or {}).get("rolling_summary", "")
+        if not previous_memory:
+            return current_summary[:max_chars]
+        prompt = f"""请维护当前飞书对话框的长期记忆。
+
+要求：
+1. 基于旧长期记忆和本轮会话摘要，生成新的滚动长期记忆。
+2. 保留这个对话框里用户的长期目标、业务背景、偏好、常用流程、重要约束、角色定位。
+3. 删除已经过时或重复的细节。
+4. 输出不超过 {max_chars} 个字符。
+5. 只输出长期记忆正文，不要解释。
+
+<old_chat_memory>
+{previous_memory}
+</old_chat_memory>
+
+<current_session_summary>
+{current_summary}
+</current_session_summary>"""
+        updated, _ = self._call_claude(prompt, None, cwd=effective_workspace)
+        return (updated or current_summary)[:max_chars]
+
+    def _memory_context_for_prompt(self, session_key: str | None, effective_rule) -> str:
+        if not session_key:
+            return ""
+        memory_policy = effective_rule.get("memory_policy", {}) or {}
+        if memory_policy.get("enabled", True) is False:
+            return ""
+        meta = self.session_store.get(session_key)
+        memory = (meta.memory or {}).get("rolling_summary", "")
+        if not memory:
+            return ""
+        max_chars = int(memory_policy.get("inject_max_chars", 4000))
+        return (
+            "\n\n<chat_memory>\n"
+            "这是当前飞书对话框的长期记忆，用于保持角色、业务背景、用户偏好和历史连续性。"
+            "不要把自己当成全新的无记忆机器人。\n"
+            f"{memory[:max_chars]}\n"
+            "</chat_memory>"
+        )
 
     def _is_mentioned(
         self,

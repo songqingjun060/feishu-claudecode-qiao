@@ -521,6 +521,9 @@ python -m feishu_claudecode_qiao --config config.toml --doctor
 | `/rules` | Show effective rules |
 | `/context` | Show current session metadata |
 | `/summary` | Show latest compaction summary |
+| `/memory` | Show current chat rolling memory |
+| `/memory history` | Show recent saved memory summaries |
+| `/memory clear` | Clear current chat long-term memory |
 | `/ask <question>` | Ask once without storing long-term context |
 | `/new` | Start a new Claude session |
 | `/reset` | Reset current session |

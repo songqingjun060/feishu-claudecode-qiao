@@ -20,6 +20,7 @@ SUPPORTED_COMMANDS = {
     "workspace",
     "paths",
     "permission",
+    "memory",
     "ask",
 }
 

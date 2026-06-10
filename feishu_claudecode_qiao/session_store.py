@@ -23,7 +23,19 @@ class SessionMeta:
     rollover_count: int = 0
     summary: str = ""
     summary_source_session_id: str = ""
+    memory: dict = None
+    memory_history: list = None
     status: str = "active"
+
+    def __post_init__(self) -> None:
+        if self.memory is None:
+            self.memory = {
+                "rolling_summary": "",
+                "updated_at": "",
+                "version": 0,
+            }
+        if self.memory_history is None:
+            self.memory_history = []
 
 
 class SessionStore:
@@ -86,12 +98,38 @@ class SessionStore:
         self._data[session_key] = asdict(meta)
         self.save()
 
-    def archive_and_rollover(self, session_key: str, new_summary: str, old_session_id: str) -> SessionMeta:
+    def archive_and_rollover(
+        self,
+        session_key: str,
+        new_summary: str,
+        old_session_id: str,
+        *,
+        rolling_summary: str | None = None,
+        history_limit: int = 50,
+        history_item_max_chars: int = 4000,
+    ) -> SessionMeta:
         meta = self.get(session_key)
         meta.summary = new_summary
         meta.summary_source_session_id = old_session_id
         meta.last_rollover_at = datetime.now(timezone.utc).isoformat()
         meta.rollover_count += 1
+        if rolling_summary is not None:
+            meta.memory = {
+                "rolling_summary": rolling_summary,
+                "updated_at": meta.last_rollover_at,
+                "version": int((meta.memory or {}).get("version", 0)) + 1,
+            }
+        if new_summary:
+            history_item = {
+                "created_at": meta.last_rollover_at,
+                "source_session_id": old_session_id,
+                "summary": new_summary[: max(0, history_item_max_chars)],
+            }
+            history = list(meta.memory_history or [])
+            history.append(history_item)
+            if history_limit > 0:
+                history = history[-history_limit:]
+            meta.memory_history = history
         meta.session_id = ""
         meta.message_count = 0
         meta.input_chars = 0
@@ -105,6 +143,19 @@ class SessionStore:
         if session_key in self._data:
             del self._data[session_key]
             self.save()
+
+    def clear_memory(self, session_key: str) -> None:
+        meta = self.get(session_key)
+        meta.summary = ""
+        meta.summary_source_session_id = ""
+        meta.memory = {
+            "rolling_summary": "",
+            "updated_at": "",
+            "version": 0,
+        }
+        meta.memory_history = []
+        self._data[session_key] = asdict(meta)
+        self.save()
 
 
 def calculate_rollover_score(meta: SessionMeta, context_policy: dict, now: datetime | None = None, force: bool = False, context_error: bool = False) -> int:
