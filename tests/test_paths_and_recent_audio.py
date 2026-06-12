@@ -525,6 +525,43 @@ def test_unmentioned_group_file_is_cached_when_event_arrives(tmp_path, monkeypat
     assert cached["files"] == [str(saved.resolve())]
 
 
+def test_invalid_file_content_does_not_crash_process_event(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Claude should not be called")
+        ),
+    )
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event(
+        make_event(
+            msg_type="file",
+            content_obj={"file_key": "unused"},
+            mentions=[],
+            message_id="om_bad_file",
+        )
+        | {
+            "event": {
+                "sender": {"sender_id": {"user_id": "ou_1", "name": "tester"}},
+                "message": {
+                    "chat_id": "oc_1",
+                    "chat_type": "group",
+                    "content": "{not-json",
+                    "mentions": [],
+                    "message_id": "om_bad_file",
+                    "message_type": "file",
+                },
+            }
+        }
+    )
+
+    assert "oc_1" not in bridge._recent_files_by_chat
+
+
 def test_bare_mention_after_group_file_uses_cached_file_context(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     saved = tmp_path / "codes.xlsx"

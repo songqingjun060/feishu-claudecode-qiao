@@ -1161,6 +1161,7 @@ class Bridge:
         chat_id = message.get("chat_id", "")
         msg_type = message.get("message_type", "text")
         content_raw = message.get("content", "")
+        content_obj: Any = {}
         try:
             content_obj = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
             content = content_obj.get("text", "") if isinstance(content_obj, dict) else ""
