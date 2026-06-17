@@ -111,6 +111,8 @@ bot_display_name = "your-bot-display-name"
 ws_profile = "qiao-test"
 ws_watchdog_interval_seconds = 30
 ws_max_restart_failures = 3
+console_message_log = true
+console_claude_stream = true
 personal_permission_profile = "admin"
 bot_owner_id = ""
 bot_admins = []
@@ -252,6 +254,8 @@ Set-Location -LiteralPath D:\feishu-claudecode-qiao
 
 桥和 WebSocket 订阅按同一个 `config.toml`、`bridge.data_dir`、`bridge.ws_profile` 绑定。桥停止时会停止对应 WebSocket；桥重启时会重启对应 WebSocket；桥运行中发现对应 WebSocket 死掉会先自动拉起，连续失败达到 `ws_max_restart_failures` 后才停止桥，避免多机器人环境互相影响。
 
+前台值守窗口默认会同时显示消息收发日志和 Claude 流式输出：收到消息时能看到会话类型、发送者、内容摘要；调用 Claude 时会显示“Claude 思考中...”并实时打印文本增量；发送完成后会显示回复或文件上传结果。若明确需要安静后台日志，可把 `console_message_log` 或 `console_claude_stream` 设为 `false`。
+
 如果只想手动管理 WebSocket，可使用：
 
 ```powershell
@@ -322,7 +326,7 @@ gateway_backend = "current"   # 当前 HTTP API 后端
 event_backend = "start_ws"    # 当前 lark-cli/start_ws.py 事件订阅后端
 ```
 
-`lark_oapi` 和 `lark_oapi_ws` 已保留为实验后端名称，但当前版本只提供占位和 doctor 提示，尚未实现生产可用的官方 SDK 后端。
+`lark_oapi` 和 `lark_oapi_ws` 已保留为实验后端名称，但当前版本只提供占位、前台 warning 和 doctor 提示，尚未实现生产可用的官方 SDK 后端。后续官方 SDK 后端也必须复用同一套前台值守日志和一对一生命周期管理，不能另起一个脱离桥管理的事件进程。
 
 ## 已验证流程
 

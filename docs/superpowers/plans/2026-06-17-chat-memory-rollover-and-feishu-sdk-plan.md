@@ -26,6 +26,7 @@
 - 当前 HTTP 和 `lark-cli` 实现继续作为默认方案。
 - 只有网关测试稳定后，再增加实验性的 `lark-oapi` 后端。
 - 先增加显式后端选择配置：`feishu.gateway_backend` 和 `feishu.event_backend`，默认仍为当前稳定链路。
+- 前台值守日志作为所有后端的共同要求：消息收发、Claude 流式输出、文件上传结果和 SDK 占位 warning 都必须能在前台窗口直接看到。
 
 ## 涉及文件
 
@@ -311,6 +312,18 @@ event_backend = "start_ws"
 ```
 
 保留实验名称 `lark_oapi` 和 `lark_oapi_ws`，但创建时明确抛出 `NotImplementedError`，并由 doctor 给出警告，避免误以为官方 SDK 后端已经可用。
+
+- [ ] **步骤 6：补齐前台值守体验**
+
+增加：
+
+```toml
+[bridge]
+console_message_log = true
+console_claude_stream = true
+```
+
+默认前台窗口镜像消息日志，并流式打印 Claude 输出。语音转写模型第一次使用时懒加载，后续复用，并指定中文识别。官方 SDK 实验后端即使只是占位，也要在启用失败时写出清楚的前台 warning。
 
 - [ ] **步骤 4：运行全量测试**
 

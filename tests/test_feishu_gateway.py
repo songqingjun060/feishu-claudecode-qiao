@@ -18,6 +18,11 @@ from feishu_claudecode_qiao.config import Config
 class RecordingBridge:
     def __init__(self):
         self.calls = []
+        self.bridge_logger = type(
+            "Logger",
+            (),
+            {"warning": lambda _self, message: self.calls.append(("warning", message))},
+        )()
 
     def _send_reply(
         self,
@@ -151,3 +156,14 @@ def test_gateway_factory_rejects_unimplemented_lark_oapi_backend(tmp_path):
 
     assert issubclass(LarkOapiFeishuGateway, CurrentFeishuGateway) is False
     assert issubclass(LarkOapiWebSocketSubscriber, StartWsEventSubscriber) is False
+
+
+def test_lark_oapi_placeholder_warns_before_raising():
+    calls = []
+    logger = type("Logger", (), {"warning": lambda _self, message: calls.append(message)})()
+
+    with pytest.raises(NotImplementedError):
+        LarkOapiFeishuGateway(Config(), logger=logger)
+
+    assert calls
+    assert "尚未实现" in calls[0]

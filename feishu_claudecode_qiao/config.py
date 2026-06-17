@@ -48,6 +48,8 @@ class Config:
     bridge_ws_profile: str = "qiao-test"
     bridge_ws_watchdog_interval_seconds: int = 30
     bridge_ws_max_restart_failures: int = 3
+    bridge_console_message_log: bool = True
+    bridge_console_claude_stream: bool = True
 
     # Security
     security_allowed_paths: list[str] = field(default_factory=list)
@@ -91,6 +93,8 @@ def _env_override(cfg: Config) -> Config:
         bridge_ws_profile=_get("FEISHUCLAUDECODE_BRIDGE_WS_PROFILE", cfg.bridge_ws_profile),
         bridge_ws_watchdog_interval_seconds=_get("FEISHUCLAUDECODE_BRIDGE_WS_WATCHDOG_INTERVAL_SECONDS", cfg.bridge_ws_watchdog_interval_seconds),
         bridge_ws_max_restart_failures=_get("FEISHUCLAUDECODE_BRIDGE_WS_MAX_RESTART_FAILURES", cfg.bridge_ws_max_restart_failures),
+        bridge_console_message_log=_get("FEISHUCLAUDECODE_BRIDGE_CONSOLE_MESSAGE_LOG", cfg.bridge_console_message_log),
+        bridge_console_claude_stream=_get("FEISHUCLAUDECODE_BRIDGE_CONSOLE_CLAUDE_STREAM", cfg.bridge_console_claude_stream),
         security_allowed_paths=_get("FEISHUCLAUDECODE_SECURITY_ALLOWED_PATHS", cfg.security_allowed_paths),
         security_blocked_keywords=_get("FEISHUCLAUDECODE_SECURITY_BLOCKED_KEYWORDS", cfg.security_blocked_keywords),
     )
@@ -132,6 +136,8 @@ def load_config(path: str | Path | None = None) -> Config:
             bridge_ws_profile=data.get("bridge", {}).get("ws_profile", "qiao-test"),
             bridge_ws_watchdog_interval_seconds=data.get("bridge", {}).get("ws_watchdog_interval_seconds", 30),
             bridge_ws_max_restart_failures=data.get("bridge", {}).get("ws_max_restart_failures", 3),
+            bridge_console_message_log=data.get("bridge", {}).get("console_message_log", True),
+            bridge_console_claude_stream=data.get("bridge", {}).get("console_claude_stream", True),
             security_allowed_paths=data.get("security", {}).get("allowed_paths", []),
             security_blocked_keywords=data.get("security", {}).get("blocked_keywords", []),
         )

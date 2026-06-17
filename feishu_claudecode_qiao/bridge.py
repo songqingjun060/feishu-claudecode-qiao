@@ -136,6 +136,7 @@ class Bridge:
         self.bridge_logger, self.msg_logger = setup_logging(
             config.bridge_data_dir,
             config.bridge_log_level,
+            mirror_messages_to_console=config.bridge_console_message_log,
         )
         self.security = SecurityPolicy(
             permission_mode=config.claude_permission_mode,
@@ -156,6 +157,8 @@ class Bridge:
         self._ws_watchdog_failures = 0
         self._recent_audio_by_chat: dict[str, dict[str, Any]] = {}
         self._recent_files_by_chat: dict[str, dict[str, Any]] = {}
+        self._whisper_model: Any | None = None
+        self._whisper_model_name: str | None = None
         drive_roots = [Path(f"{chr(letter)}:/") for letter in range(ord("A"), ord("Z") + 1)]
         self._local_file_search_dirs = [
             Path.home() / "Desktop",
@@ -2373,6 +2376,53 @@ Rules:
 
         self.bridge_logger.debug(f"Claude cmd: {' '.join(args[:6])}...")
 
+        final_text = ""
+        new_session_id: str | None = None
+        result_text = ""
+
+        def emit_console(text: str, *, end: str = "\n") -> None:
+            if self.config.bridge_console_claude_stream:
+                print(text, end=end, flush=True)
+
+        def handle_line(line: str) -> None:
+            nonlocal final_text, new_session_id, result_text
+            line = line.strip()
+            if not line:
+                return
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                return
+
+            event_type = event.get("type", "")
+            if event_type == "system":
+                new_session_id = event.get(
+                    "session_id", new_session_id
+                )
+            elif event_type == "stream_event":
+                sub = event.get("event", {})
+                sub_type = sub.get("type", "")
+                if sub_type == "content_block_delta":
+                    delta = sub.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        chunk = delta.get("text", "")
+                        final_text += chunk
+                        if chunk:
+                            emit_console(chunk, end="")
+            elif event_type == "result":
+                result = event.get("result", "")
+                if isinstance(result, str):
+                    result_text = result
+                elif isinstance(result, list):
+                    parts = [
+                        item.get("text", "")
+                        for item in result
+                        if isinstance(item, dict) and item.get("type") == "text"
+                    ]
+                    if parts:
+                        result_text = "".join(parts)
+
+        proc = None
         try:
             popen_args, use_shell = self._build_claude_popen_args(args)
             proc = subprocess.Popen(
@@ -2387,11 +2437,23 @@ Rules:
                 cwd=cwd or self.config.claude_work_dir or None,
                 shell=use_shell,
             )
-            stdout, stderr = proc.communicate(
-                input=prompt + "\n", timeout=600
-            )
+            if proc.stdin:
+                proc.stdin.write(prompt + "\n")
+                proc.stdin.close()
+
+            emit_console("\n" + "-" * 60)
+            emit_console("Claude 思考中...")
+            emit_console("-" * 60)
+
+            if proc.stdout:
+                for raw_line in proc.stdout:
+                    handle_line(raw_line)
+            proc.wait(timeout=600)
+            emit_console("\n" + "-" * 60)
+            stderr = proc.stderr.read() if proc.stderr else ""
         except subprocess.TimeoutExpired:
-            proc.kill()
+            if proc is not None:
+                proc.kill()
             self.bridge_logger.error("Claude CLI调用超时")
             return "[错误: Claude CLI调用超时]", None
         except Exception as e:
@@ -2403,36 +2465,36 @@ Rules:
             if "No conversation found with session ID" in stderr:
                 return f"[错误: {stderr.strip()}]", None
 
-        final_text = ""
-        new_session_id: str | None = None
+        if result_text and len(result_text) >= len(final_text):
+            final_text = result_text
 
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            event_type = event.get("type", "")
-            if event_type == "system":
-                new_session_id = event.get(
-                    "session_id", new_session_id
-                )
-            elif event_type == "stream_event":
-                sub = event.get("event", {})
-                sub_type = sub.get("type", "")
-                if sub_type == "content_block_delta":
-                    delta = sub.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        final_text += delta.get("text", "")
-            elif event_type == "result":
-                result = event.get("result", "")
-                if result and not final_text:
-                    final_text = result
+        preview = final_text.replace("\n", " ")[:200]
+        if preview:
+            self.bridge_logger.debug(f"Reply preview: {preview}...")
 
         return final_text or "[Claude未返回内容]", new_session_id or session_id
+
+    def _load_whisper_model(self) -> Any | None:
+        if self._whisper_model is not None and self._whisper_model_name == self.config.whisper_model:
+            return self._whisper_model
+        try:
+            from faster_whisper import WhisperModel
+
+            self.bridge_logger.info(
+                f"Loading Whisper model '{self.config.whisper_model}'..."
+            )
+            self._whisper_model = WhisperModel(
+                self.config.whisper_model,
+                device="cpu",
+                compute_type="int8",
+            )
+            self._whisper_model_name = self.config.whisper_model
+            self.bridge_logger.info(
+                f"Whisper model '{self.config.whisper_model}' loaded"
+            )
+            return self._whisper_model
+        except ImportError:
+            return None
 
     def _call_claude_with_recovery(
         self,
@@ -2829,25 +2891,13 @@ Rules:
 
         # Transcribe with faster-whisper
         try:
-            from faster_whisper import WhisperModel
-
-            self.bridge_logger.info(
-                f"Loading Whisper model '{self.config.whisper_model}'..."
-            )
-            model = WhisperModel(
-                self.config.whisper_model,
-                device="cpu",
-                compute_type="int8",
-            )
-            self.bridge_logger.info(
-                f"Whisper model '{self.config.whisper_model}' loaded"
-            )
-            segments, _ = model.transcribe(str(audio_path))
+            model = self._load_whisper_model()
+            if model is None:
+                return "[语音转文字不可用: 未安装 faster-whisper]"
+            segments, _ = model.transcribe(str(audio_path), language="zh")
             text = " ".join(s.text for s in segments)
             self.bridge_logger.info(f"Transcribed: {text[:100]}...")
             return text
-        except ImportError:
-            return "[语音转文字不可用: 未安装 faster-whisper]"
         except Exception as e:
             self.bridge_logger.exception(f"语音转录失败: {e}")
             return f"[语音转录失败: {e}]"

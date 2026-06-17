@@ -11,6 +11,7 @@ from pathlib import Path
 def setup_logging(
     data_dir: str = "./data",
     log_level: str = "INFO",
+    mirror_messages_to_console: bool = True,
 ) -> tuple[logging.Logger, logging.Logger]:
     """Configure bridge and message loggers.
 
@@ -57,5 +58,10 @@ def setup_logging(
     )
     message_file.setFormatter(fmt)
     message_logger.addHandler(message_file)
+
+    if mirror_messages_to_console:
+        message_console = logging.StreamHandler(sys.stdout)
+        message_console.setFormatter(fmt)
+        message_logger.addHandler(message_console)
 
     return bridge_logger, message_logger

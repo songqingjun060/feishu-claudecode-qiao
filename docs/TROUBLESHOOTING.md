@@ -34,6 +34,17 @@ require_mention_in_group = true
 bot_display_name = "your-bot-display-name"
 ```
 
+## 前台窗口看不出是否在处理
+
+默认前台运行会显示消息收发日志和 Claude 流式输出。如果窗口只看到服务启动信息，看不到 `📩` 收到消息、`Claude 思考中...` 或 `✅ 回复已发送`，请检查：
+
+- `bridge.console_message_log` 是否为 `true`。
+- `bridge.console_claude_stream` 是否为 `true`。
+- 是否使用了 `.\start_all.ps1 -Restart` 前台启动，而不是 `-Background`。
+- `data/logs/messages.log` 是否仍在写入。如果文件有内容但前台没有，通常是前台镜像开关被关闭。
+
+后台部署可以关闭这两个开关，日志仍会写入 `bridge.log` 和 `messages.log`。
+
 ## 重启后回复旧消息
 
 桥启动时会从事件文件当前末尾开始读取。如果仍然回复旧消息，请确认运行进程是最新版本并重启：
@@ -91,6 +102,8 @@ im:message.group_msg
 ```
 
 缺少这个权限时，桥仍可处理飞书直接推送到桥的媒体事件，但无法主动回查群里的上一条音频或文件。
+
+语音转写模型会在第一次使用时加载并缓存，后续语音复用同一个 Whisper 模型。转写时默认指定中文识别，减少繁体或语言漂移。如果第一次语音慢、后续明显变快，这是正常现象。
 
 ## 文件上传失败
 
@@ -196,6 +209,7 @@ data/logs/messages.log
 - SDK WebSocket 是否实现 `FeishuEventSubscriber.start/stop/restart/status`，并继续遵守 `config.toml + data_dir + ws_profile` 的一对一生命周期绑定。
 - 是否只有显式配置后才切换到 SDK 后端。
 - `doctor` 中 `feishu_gateway_backend` 和 `feishu_event_backend` 是否仍显示当前稳定后端；如果显示 `lark_oapi` 或 `lark_oapi_ws selected but not implemented`，说明配置已经切到尚未实现的实验后端。
+- 实验 SDK 后端启用失败时，前台窗口是否打印“官方 lark-oapi 后端尚未实现”的 warning。
 - 失败时是否能快速切回当前 HTTP 和 `lark-cli` 链路。
 
 ## 需要查看的日志

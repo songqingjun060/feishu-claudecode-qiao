@@ -62,6 +62,8 @@ permission_mode = "safe"
 data_dir = "./data"
 require_mention_in_group = true
 bot_display_name = "your-bot-display-name"
+console_message_log = true
+console_claude_stream = true
 personal_permission_profile = "admin"
 bot_owner_id = "your-feishu-open-id"
 bot_admins = []
@@ -116,6 +118,14 @@ Set-Location -LiteralPath D:\feishu-claudecode-qiao
 ```
 
 桥和 WebSocket 订阅会按同一个 `config.toml`、`bridge.data_dir`、`bridge.ws_profile` 绑定。桥停止时会停止对应 WebSocket；桥重启时会重启对应 WebSocket；桥运行中发现对应 WebSocket 死掉会先自动拉起，连续恢复失败达到 `ws_max_restart_failures` 后桥才退出。
+
+默认前台窗口会显示消息收发、Claude 流式输出、回复预览和发送结果。若是纯后台部署，可以关闭前台镜像：
+
+```toml
+[bridge]
+console_message_log = false
+console_claude_stream = false
+```
 
 也可以手动管理 WebSocket：
 

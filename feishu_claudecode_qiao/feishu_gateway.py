@@ -114,17 +114,21 @@ class LarkOapiFeishuGateway:
     不改变生产默认链路。
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, logger: object | None = None):
         self.config = config
+        if logger is not None:
+            logger.warning("官方 lark-oapi API 后端尚未实现，已拒绝启用")
         raise NotImplementedError("lark-oapi API backend is not implemented yet")
 
 
 class LarkOapiWebSocketSubscriber:
     """官方 lark-oapi WebSocket 后端占位。"""
 
-    def __init__(self, config: Config, config_path: str | Path):
+    def __init__(self, config: Config, config_path: str | Path, logger: object | None = None):
         self.config = config
         self.config_path = Path(config_path).expanduser().resolve()
+        if logger is not None:
+            logger.warning("官方 lark-oapi WebSocket 后端尚未实现，已拒绝启用")
         raise NotImplementedError("lark-oapi WebSocket backend is not implemented yet")
 
 
@@ -133,7 +137,7 @@ def create_feishu_gateway(config: Config, bridge: object) -> FeishuGateway:
     if backend in {"current", "http", "legacy"}:
         return CurrentFeishuGateway(bridge)
     if backend in {"lark_oapi", "lark-oapi", "official"}:
-        return LarkOapiFeishuGateway(config)
+        return LarkOapiFeishuGateway(config, logger=getattr(bridge, "bridge_logger", None))
     raise ValueError(f"Unknown Feishu gateway backend: {config.feishu_gateway_backend}")
 
 
