@@ -195,6 +195,7 @@ data/logs/messages.log
 - 发送、回复、上传、下载、表情回应能力是否都有网关测试覆盖。
 - SDK WebSocket 是否实现 `FeishuEventSubscriber.start/stop/restart/status`，并继续遵守 `config.toml + data_dir + ws_profile` 的一对一生命周期绑定。
 - 是否只有显式配置后才切换到 SDK 后端。
+- `doctor` 中 `feishu_gateway_backend` 和 `feishu_event_backend` 是否仍显示当前稳定后端；如果显示 `lark_oapi` 或 `lark_oapi_ws selected but not implemented`，说明配置已经切到尚未实现的实验后端。
 - 失败时是否能快速切回当前 HTTP 和 `lark-cli` 链路。
 
 ## 需要查看的日志

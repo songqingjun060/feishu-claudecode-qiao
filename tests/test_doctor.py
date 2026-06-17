@@ -98,6 +98,29 @@ ws_profile = "qiao-test"
     assert "metadata" in results["websocket_pid"]["hint"].lower()
 
 
+def test_doctor_reports_explicit_feishu_backends(tmp_path):
+    config = tmp_path / "config.toml"
+    data_dir = tmp_path / "data"
+    config.write_text(
+        f"""
+[feishu]
+gateway_backend = "lark_oapi"
+event_backend = "lark_oapi_ws"
+
+[bridge]
+data_dir = "{data_dir.as_posix()}"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    results = {item["check"]: item for item in run_doctor(str(config))}
+
+    assert results["feishu_gateway_backend"]["ok"] is False
+    assert "lark_oapi" in results["feishu_gateway_backend"]["hint"]
+    assert results["feishu_event_backend"]["ok"] is False
+    assert "lark_oapi_ws" in results["feishu_event_backend"]["hint"]
+
+
 def test_print_results_optional_failure_does_not_return_one():
     results = [
         {"check": "whisper", "ok": False, "level": "optional"},

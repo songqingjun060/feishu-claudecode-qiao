@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from .config import Config
+
 
 @runtime_checkable
 class FeishuGateway(Protocol):
@@ -103,6 +105,48 @@ class StartWsEventSubscriber:
 
     def status(self) -> bool:
         return self._run("status")
+
+
+class LarkOapiFeishuGateway:
+    """官方 lark-oapi API 后端占位。
+
+    该后端必须显式配置后才会尝试创建；当前版本只保留切换入口，
+    不改变生产默认链路。
+    """
+
+    def __init__(self, config: Config):
+        self.config = config
+        raise NotImplementedError("lark-oapi API backend is not implemented yet")
+
+
+class LarkOapiWebSocketSubscriber:
+    """官方 lark-oapi WebSocket 后端占位。"""
+
+    def __init__(self, config: Config, config_path: str | Path):
+        self.config = config
+        self.config_path = Path(config_path).expanduser().resolve()
+        raise NotImplementedError("lark-oapi WebSocket backend is not implemented yet")
+
+
+def create_feishu_gateway(config: Config, bridge: object) -> FeishuGateway:
+    backend = (config.feishu_gateway_backend or "current").lower()
+    if backend in {"current", "http", "legacy"}:
+        return CurrentFeishuGateway(bridge)
+    if backend in {"lark_oapi", "lark-oapi", "official"}:
+        return LarkOapiFeishuGateway(config)
+    raise ValueError(f"Unknown Feishu gateway backend: {config.feishu_gateway_backend}")
+
+
+def create_event_subscriber(
+    config: Config,
+    config_path: str | Path,
+) -> FeishuEventSubscriber:
+    backend = (config.feishu_event_backend or "start_ws").lower()
+    if backend in {"start_ws", "lark_cli", "lark-cli"}:
+        return StartWsEventSubscriber(config_path, config.bridge_ws_profile)
+    if backend in {"lark_oapi_ws", "lark-oapi-ws", "official_ws"}:
+        return LarkOapiWebSocketSubscriber(config, config_path)
+    raise ValueError(f"Unknown Feishu event backend: {config.feishu_event_backend}")
 
 
 class CurrentFeishuGateway:

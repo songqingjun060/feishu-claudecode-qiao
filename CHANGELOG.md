@@ -1,39 +1,42 @@
-# Changelog
+# 更新记录
 
-## Unreleased
+## 未发布
 
-- Added one-to-one bridge/WebSocket lifecycle binding with profile metadata, paired stop/restart, and foreground-first startup.
-- Added continuous image context: bare image messages are cached without calling Claude, and follow-up text can process recent images together.
-- Added multi-image rich-text handling so all image paths are passed to Claude in one request.
-- Tightened group mention matching so messages that mention another bot no longer trigger this bridge.
-- Documented `bot_display_name` for exact group mention matching in multi-bot groups.
-- Added `start_ws.py` to manage the lark-cli event subscriber with an explicit profile per bridge.
-- Added `run_foreground.ps1` for one-window foreground bridge operation with background subscriber checks.
+- 增加桥和 WebSocket 订阅的一对一生命周期绑定，包括 profile 元数据、成对停止/重启和默认前台启动。
+- 增加连续图片上下文：裸图片消息先缓存，不直接调用 Claude；后续任务文本可以一次性处理最近图片。
+- 增加富文本多图片处理，同一条消息里的全部图片路径会一次性交给 Claude。
+- 收紧群聊 mention 匹配，@ 其他机器人时不会触发当前桥。
+- 文档补充 `bot_display_name`，用于多机器人群里的精确 mention 匹配。
+- 增加 `start_ws.py`，用独立 profile 管理 `lark-cli` 事件订阅。
+- 增加 `run_foreground.ps1`，用于单窗口前台运行桥，并检查后台订阅状态。
+- 增加飞书 API 后端和事件后端的显式配置入口，默认仍使用当前稳定链路。
+- 为后续官方 SDK 迁移预留 `lark_oapi` 和 `lark_oapi_ws` 实验后端名称，并在尚未实现时通过 doctor 提示。
+- 文档统一为简体中文说明。
 
 ## 0.3.0
 
-- Added group replies through Feishu reply endpoint with sender mention.
-- Added temporary receive reaction and cleanup after processing.
-- Added local file upload from allowed local paths to Feishu chat.
-- Added group recent-audio workflow: send audio first, then mention the bot.
-- Added Kimi Coding Anthropic-compatible Vision API support.
-- Added Vision URL normalization for Anthropic and OpenAI-compatible providers.
-- Added restart behavior that starts from the end of the event file to avoid old-message replay.
-- Added Claude missing-session retry by clearing stale session id.
-- Expanded tests to 129 passing cases.
-- Added deployment and troubleshooting documentation.
+- 增加通过飞书回复接口进行群聊回复，并 @ 原发送者。
+- 增加收到消息后的临时响应标记，处理完成后自动清理。
+- 增加从已授权本地路径上传文件到飞书会话的能力。
+- 增加群聊近期音频流程：先发送音频，再 @ 机器人处理。
+- 增加 Kimi Coding 兼容 Anthropic 的视觉接口支持。
+- 增加 Anthropic 和 OpenAI 兼容视觉服务的图片 URL 规范化。
+- 增加重启后从事件文件末尾读取的行为，避免重放旧消息。
+- 增加 Claude session 缺失时清理旧 session id 并重试一次。
+- 扩展测试到 129 个通过用例。
+- 增加部署和故障排查文档。
 
 ## 0.2.0
 
-- Added `SessionStore` for session metadata.
-- Added automatic session rollover summary support.
-- Added effective rule resolution for default, chat, member, and temporary rules.
-- Added `permission_profile` mapping to Claude CLI permission modes.
-- Added workspace and allowed path enforcement.
-- Added risky intent detection and `confirm_policy`.
-- Added `/workspace`, `/permission`, `/context`, `/summary`, `/new`, `/reset`, and `/compact`.
-- Added audit logs and doctor checks.
+- 增加 `SessionStore` 保存 Claude 会话元数据。
+- 增加自动会话翻页摘要能力。
+- 增加默认、会话、成员和临时规则的合并解析。
+- 增加 `permission_profile` 到 Claude CLI 权限模式的映射。
+- 增加工作目录和可访问路径校验。
+- 增加高风险意图检测和 `confirm_policy`。
+- 增加 `/workspace`、`/permission`、`/context`、`/summary`、`/new`、`/reset` 和 `/compact`。
+- 增加审计日志和 doctor 自检。
 
 ## 0.1.0
 
-- Initial Feishu-Claude Code bridge.
+- 首个飞书到 Claude Code 的桥接版本。

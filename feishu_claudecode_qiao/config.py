@@ -25,6 +25,8 @@ class Config:
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
     feishu_domain: str = "https://open.feishu.cn"
+    feishu_gateway_backend: str = "current"
+    feishu_event_backend: str = "start_ws"
 
     # Claude
     claude_command: str = "claude"
@@ -72,6 +74,8 @@ def _env_override(cfg: Config) -> Config:
         feishu_app_id=_get("FEISHUCLAUDECODE_FEISHU_APP_ID", cfg.feishu_app_id),
         feishu_app_secret=_get("FEISHUCLAUDECODE_FEISHU_APP_SECRET", cfg.feishu_app_secret),
         feishu_domain=_get("FEISHUCLAUDECODE_FEISHU_DOMAIN", cfg.feishu_domain),
+        feishu_gateway_backend=_get("FEISHUCLAUDECODE_FEISHU_GATEWAY_BACKEND", cfg.feishu_gateway_backend),
+        feishu_event_backend=_get("FEISHUCLAUDECODE_FEISHU_EVENT_BACKEND", cfg.feishu_event_backend),
         claude_command=_get("FEISHUCLAUDECODE_CLAUDE_COMMAND", cfg.claude_command),
         claude_work_dir=_get("FEISHUCLAUDECODE_CLAUDE_WORK_DIR", cfg.claude_work_dir),
         claude_permission_mode=_get("FEISHUCLAUDECODE_CLAUDE_PERMISSION_MODE", cfg.claude_permission_mode),
@@ -111,6 +115,8 @@ def load_config(path: str | Path | None = None) -> Config:
             feishu_app_id=data.get("feishu", {}).get("app_id", ""),
             feishu_app_secret=data.get("feishu", {}).get("app_secret", ""),
             feishu_domain=data.get("feishu", {}).get("domain", "https://open.feishu.cn"),
+            feishu_gateway_backend=data.get("feishu", {}).get("gateway_backend", "current"),
+            feishu_event_backend=data.get("feishu", {}).get("event_backend", "start_ws"),
             claude_command=data.get("claude", {}).get("command", "claude"),
             claude_work_dir=data.get("claude", {}).get("work_dir", "."),
             claude_permission_mode=data.get("claude", {}).get("permission_mode", "bypassPermissions"),

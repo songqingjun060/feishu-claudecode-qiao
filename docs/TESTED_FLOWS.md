@@ -1,28 +1,32 @@
-# Tested Flows
+# 已验证流程
 
-Last local verification: 2026-06-05
+最近一次本地验证：2026-06-17
 
-Automated tests:
+自动化测试：
 
 ```text
-129 passed
+195 passed
 ```
 
-Real Feishu deployment flows verified:
+已验证的真实飞书部署流程：
 
-- Text group message to Claude.
-- Group reply quotes the source message and mentions sender.
-- Temporary reaction is added on receipt and removed after completion.
-- Local desktop Markdown file upload to group after rule validation.
-- Personal audio transcription.
-- Group audio transcription when user sends audio first and then mentions the bot.
-- Image download and Claude Code local-path handoff.
-- Bridge restart starts from the current event-file end offset and does not replay old messages.
-- Stale Claude session id is cleared and retried once.
+- 群聊文本消息可以转交给 Claude Code。
+- 群聊回复会引用原消息并 @ 发送者。
+- 收到消息后会添加临时响应标记，处理完成后自动删除。
+- 本地桌面 Markdown 文件通过规则校验后可以上传到群聊。
+- 个人会话音频可以转写。
+- 群聊中“先发音频，再 @ 机器人”的流程可以转写。
+- 飞书图片可以下载到本地，并把本地路径交给 Claude Code。
+- 连续发送的多张裸图片会先缓存，后续任务文本会一次性带入最近图片上下文。
+- 桥重启会从事件文件当前末尾开始读取，不会重放旧消息。
+- 失效的 Claude session id 会被清理并重试一次。
+- 桥和 WebSocket 订阅按同一个配置和 profile 绑定；桥停止或重启会同步处理对应 WebSocket。
+- `doctor` 可以提示当前飞书 API 后端和事件后端是否仍是稳定链路。
 
-Known limitations:
+已知限制：
 
-- File message payloads can quote the source message but cannot embed an extra textual mention.
-- The bridge does not upload arbitrary desktop files unless the message intent is clear and the path passes rule validation.
-- `admin` permission profile is suitable only for trusted testing or maintenance.
-- Logs can contain chat content and local file paths.
+- 文件消息可以引用原消息，但文件载荷本身不能嵌入额外文字 mention。
+- 桥不会随意上传桌面文件；必须有明确消息意图，并且路径通过规则校验。
+- `admin` 权限档位只适合可信测试或维护场景。
+- `lark_oapi` 和 `lark_oapi_ws` 目前只是预留实验后端名称，尚未实现生产可用的官方 SDK 后端。
+- 日志可能包含聊天内容、本地路径和敏感配置线索，不要公开分享。

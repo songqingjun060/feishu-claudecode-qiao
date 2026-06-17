@@ -123,6 +123,36 @@ def run_doctor(config_path: str = "config.toml") -> list[dict[str, Any]]:
             ws_hint = f"PID ????: {e}"
     results.append({"check": "websocket_pid", "ok": ws_ok, "level": "warning", "hint": ws_hint})
 
+    gateway_backend = (cfg.feishu_gateway_backend or "current").lower()
+    gateway_ok = gateway_backend in {"current", "http", "legacy"}
+    results.append(
+        {
+            "check": "feishu_gateway_backend",
+            "ok": gateway_ok,
+            "level": "warning",
+            "hint": (
+                f"{cfg.feishu_gateway_backend} active"
+                if gateway_ok
+                else f"{cfg.feishu_gateway_backend} selected but not implemented"
+            ),
+        }
+    )
+
+    event_backend = (cfg.feishu_event_backend or "start_ws").lower()
+    event_ok = event_backend in {"start_ws", "lark_cli", "lark-cli"}
+    results.append(
+        {
+            "check": "feishu_event_backend",
+            "ok": event_ok,
+            "level": "warning",
+            "hint": (
+                f"{cfg.feishu_event_backend} active"
+                if event_ok
+                else f"{cfg.feishu_event_backend} selected but not implemented"
+            ),
+        }
+    )
+
     try:
         from .feishu_gateway import CurrentFeishuGateway, FeishuGateway
 

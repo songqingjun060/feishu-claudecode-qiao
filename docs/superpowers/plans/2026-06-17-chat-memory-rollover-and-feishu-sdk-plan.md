@@ -25,6 +25,7 @@
 - 在事件订阅侧增加 `FeishuEventSubscriber`，统一 `start`、`stop`、`restart`、`status` 生命周期。
 - 当前 HTTP 和 `lark-cli` 实现继续作为默认方案。
 - 只有网关测试稳定后，再增加实验性的 `lark-oapi` 后端。
+- 先增加显式后端选择配置：`feishu.gateway_backend` 和 `feishu.event_backend`，默认仍为当前稳定链路。
 
 ## 涉及文件
 
@@ -298,6 +299,18 @@ class FeishuEventSubscriber:
 
 桥仍然使用当前配置、`lark-cli` 事件文件和当前 token 流程。
 事件订阅仍然按 `config.toml + bridge.data_dir + bridge.ws_profile` 绑定：桥停则订阅停，桥重启则订阅重启，订阅连续恢复失败则桥退出。
+
+- [ ] **步骤 5：增加显式后端选择，但不启用 SDK**
+
+默认值：
+
+```toml
+[feishu]
+gateway_backend = "current"
+event_backend = "start_ws"
+```
+
+保留实验名称 `lark_oapi` 和 `lark_oapi_ws`，但创建时明确抛出 `NotImplementedError`，并由 doctor 给出警告，避免误以为官方 SDK 后端已经可用。
 
 - [ ] **步骤 4：运行全量测试**
 

@@ -1,48 +1,54 @@
-# Security Policy
+# 安全说明
 
-## Do Not Commit Or Share Secrets
+## 不要提交或分享密钥
 
-Never commit or share:
+不要提交或公开分享：
 
 - `config.toml`
 - `config.realtest.toml`
 - `.env`
-- Feishu `app_secret`
-- Vision API keys
-- Claude credentials
-- Runtime `data/` or `data-test/`
-- Logs under `data/logs/`
-- Downloaded images, audio, and attachments
+- 飞书 `app_secret`
+- 各类模型或视觉接口密钥
+- Claude 凭证
+- 运行数据目录 `data/` 或 `data-test/`
+- `data/logs/` 下的日志
+- 下载后的图片、音频和附件
 
-Use `config.example.toml` and `.env.example` as templates.
+请使用 `config.example.toml` 和 `.env.example` 作为配置模板。
 
-## Runtime Logs
+## 运行日志
 
-The bridge records operational logs and message flow. `messages.log` can contain chat content. `audit.jsonl` can contain local paths and security decisions. Treat all runtime logs as private.
+桥会记录服务运行日志和消息流转日志。`messages.log` 可能包含聊天内容，`audit.jsonl` 可能包含本地路径和安全决策。所有运行日志都应按私密数据处理。
 
-## Permission Profiles
+## 权限档位
 
-Prefer:
+推荐：
 
-- `readonly` for read-only usage.
-- `safe` for normal group usage.
-- `dev` only for trusted development groups.
+- `readonly` 用于只读场景。
+- `safe` 用于普通群聊。
+- `dev` 只用于可信开发群。
 
-Use `admin` / `bypassPermissions` only for highly trusted local testing or maintenance. It can allow Claude CLI to perform high-impact operations.
+`admin` 或 `bypassPermissions` 只适合高度可信的本地测试或维护场景。该档位可能允许 Claude CLI 执行高影响操作。
 
-## Path Rules
+## 路径规则
 
-Set `allowed_paths` narrowly. Do not grant whole-disk access in production groups unless every group member is trusted.
+尽量把 `allowed_paths` 设置得具体。生产群里不要轻易授权整盘访问，除非群内所有成员都可信。
 
-## Feishu Permissions
+`allowed_paths = []` 不代表允许访问全部路径。需要访问某个目录时，应在全局配置或当前会话规则中显式添加。
 
-Grant only the permissions required by the enabled features. If group-history media lookup is not needed, do not grant `im:message.group_msg`.
+## 飞书权限
 
-## Incident Response
+只授予当前启用功能真正需要的飞书权限。如果不需要群历史媒体回查，就不要授予 `im:message.group_msg`。
 
-If a key is exposed:
+## 事件订阅隔离
 
-1. Stop the bridge.
-2. Revoke or rotate the exposed key in Feishu or the model provider.
-3. Delete affected logs or runtime data before sharing diagnostics.
-4. Restart with a new config.
+多机器人并行时，每个桥应使用独立的 `bridge.data_dir` 和对应的 `bridge.ws_profile`。不要让两个桥共用同一个 WebSocket 订阅状态文件，避免互相停止、误读或重复处理事件。
+
+## 事故处理
+
+如果密钥暴露：
+
+1. 停止桥。
+2. 在飞书或模型服务商后台撤销或轮换暴露的密钥。
+3. 对外分享诊断信息前，删除受影响日志或运行数据。
+4. 使用新配置重新启动。

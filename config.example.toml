@@ -2,6 +2,8 @@
 app_id = "cli_xxxxx"
 app_secret = ""
 domain = "https://open.feishu.cn"
+gateway_backend = "current"
+event_backend = "start_ws"
 
 [claude]
 command = "claude"

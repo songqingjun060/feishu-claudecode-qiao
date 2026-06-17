@@ -6,8 +6,13 @@ from feishu_claudecode_qiao.feishu_gateway import (
     CurrentFeishuGateway,
     FeishuEventSubscriber,
     FeishuGateway,
+    LarkOapiFeishuGateway,
+    LarkOapiWebSocketSubscriber,
     StartWsEventSubscriber,
+    create_event_subscriber,
+    create_feishu_gateway,
 )
+from feishu_claudecode_qiao.config import Config
 
 
 class RecordingBridge:
@@ -119,3 +124,30 @@ def test_start_ws_event_subscriber_delegates_lifecycle_to_start_ws(tmp_path, mon
         assert str((tmp_path / "config.toml").resolve()) in args
         assert "--profile" in args
         assert "qiao-test" in args
+
+
+def test_gateway_factory_keeps_current_backend_by_default(tmp_path):
+    bridge = RecordingBridge()
+    config = Config()
+
+    gateway = create_feishu_gateway(config, bridge)
+    subscriber = create_event_subscriber(config, tmp_path / "config.toml")
+
+    assert isinstance(gateway, CurrentFeishuGateway)
+    assert isinstance(subscriber, StartWsEventSubscriber)
+
+
+def test_gateway_factory_rejects_unimplemented_lark_oapi_backend(tmp_path):
+    bridge = RecordingBridge()
+    config = Config(
+        feishu_gateway_backend="lark_oapi",
+        feishu_event_backend="lark_oapi_ws",
+    )
+
+    with pytest.raises(NotImplementedError):
+        create_feishu_gateway(config, bridge)
+    with pytest.raises(NotImplementedError):
+        create_event_subscriber(config, tmp_path / "config.toml")
+
+    assert issubclass(LarkOapiFeishuGateway, CurrentFeishuGateway) is False
+    assert issubclass(LarkOapiWebSocketSubscriber, StartWsEventSubscriber) is False

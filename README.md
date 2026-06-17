@@ -91,6 +91,8 @@ copy config.example.toml config.toml
 app_id = "cli_xxxxx"
 app_secret = "xxxxx"
 domain = "https://open.feishu.cn"
+gateway_backend = "current"
+event_backend = "start_ws"
 
 [claude]
 command = "claude"
@@ -311,6 +313,16 @@ Claude 偶发 `api error: 500` 或 `internal server error` 时，桥会优先把
 官方 SDK 后端不能绕开 `FeishuEventSubscriber` 直接启动事件流。无论底层是 `lark-cli` 还是 `lark-oapi` WebSocket，都必须继续遵守 `config.toml + bridge.data_dir + bridge.ws_profile` 的一对一绑定，保证桥停止时事件订阅停止、桥重启时事件订阅重启、订阅连续恢复失败时桥退出。
 
 SDK 后端应作为实验性实现逐步接入，默认不改变生产行为。只有网关测试稳定、现有 HTTP 后端保持兼容，并且可以按配置显式切换后，才切换到 `lark-oapi` 或其他官方 SDK 实现。
+
+当前可配置的后端选择：
+
+```toml
+[feishu]
+gateway_backend = "current"   # 当前 HTTP API 后端
+event_backend = "start_ws"    # 当前 lark-cli/start_ws.py 事件订阅后端
+```
+
+`lark_oapi` 和 `lark_oapi_ws` 已保留为实验后端名称，但当前版本只提供占位和 doctor 提示，尚未实现生产可用的官方 SDK 后端。
 
 ## 已验证流程
 
