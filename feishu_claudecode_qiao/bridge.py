@@ -202,6 +202,29 @@ class Bridge:
                     return found
         return ""
 
+    def _extract_post_image_keys(self, value: Any) -> list[str]:
+        keys: list[str] = []
+
+        def add(image_key: Any) -> None:
+            if not image_key:
+                return
+            key = str(image_key)
+            if key not in keys:
+                keys.append(key)
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                if node.get("tag") == "img":
+                    add(node.get("image_key"))
+                for item in node.values():
+                    walk(item)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(value)
+        return keys
+
     def _extract_image_key(self, content_obj: Any, content_raw: Any = "") -> str:
         if isinstance(content_obj, dict):
             image_key = content_obj.get("image_key")
@@ -212,6 +235,25 @@ class Bridge:
             if match:
                 return match.group(1)
         return ""
+
+    def _extract_image_keys(self, content_obj: Any, content_raw: Any = "") -> list[str]:
+        keys: list[str] = []
+
+        def add(image_key: Any) -> None:
+            if not image_key:
+                return
+            key = str(image_key)
+            if key not in keys:
+                keys.append(key)
+
+        if isinstance(content_obj, dict):
+            add(content_obj.get("image_key"))
+            for key in self._extract_post_image_keys(content_obj):
+                add(key)
+        if isinstance(content_raw, str):
+            for match in re.finditer(r"\[Image:\s*([^\]\s]+)\]", content_raw):
+                add(match.group(1))
+        return keys
 
     def _parse_file_xml_content(self, content: str) -> dict[str, str] | None:
         if not content.strip().startswith("<file"):
@@ -256,11 +298,39 @@ class Bridge:
         target = Path(path).expanduser().resolve()
         if not target.is_file():
             return
+        now = time.time()
+        path_str = str(target)
+        recent = self._recent_files_by_chat.get(chat_id)
+        files: list[str] = []
+        if recent and now - float(recent.get("created_at", 0)) <= 1800:
+            for item in recent.get("files", []) or []:
+                item_path = str(Path(str(item)).expanduser().resolve())
+                if item_path and item_path not in files:
+                    files.append(item_path)
+        files = [item for item in files if item != path_str]
+        files.append(path_str)
+        files = files[-20:]
         self._recent_files_by_chat[chat_id] = {
-            "files": [str(target)],
-            "created_at": time.time(),
+            "files": files,
+            "created_at": now,
             "uploaded": uploaded,
         }
+
+    def _cache_recent_image_message(
+        self,
+        chat_id: str,
+        message_id: str,
+        content_obj: Any,
+        content_raw: Any = "",
+    ) -> list[str]:
+        paths: list[str] = []
+        for image_key in self._extract_image_keys(content_obj, content_raw):
+            img_path = self._download_image(message_id, image_key)
+            if not img_path:
+                continue
+            self._cache_recent_file_path(chat_id, img_path)
+            paths.append(img_path)
+        return paths
 
     def _cache_recent_file_message(
         self,
@@ -1179,6 +1249,11 @@ class Bridge:
         elif msg_type == "file":
             if isinstance(content_obj, dict):
                 self._cache_recent_file_message(chat_id, msg_id, content_obj, sender)
+        elif msg_type in ("image", "post") and chat_type == "group" and self.config.bridge_require_mention_in_group:
+            bot_name = self.config.bridge_bot_display_name or "bot"
+            mentions = message.get("mentions", [])
+            if not self._is_mentioned(content, bot_name, mentions):
+                self._cache_recent_image_message(chat_id, msg_id, content_obj, content_raw)
 
         if chat_type == "group" and self.config.bridge_require_mention_in_group:
             bot_name = self.config.bridge_bot_display_name or "bot"
@@ -1450,41 +1525,62 @@ class Bridge:
 
         # Handle media messages
         img_path: str | None = None
+        image_paths: list[str] = []
         if msg_type == "image":
-            img_path = self._download_image(
-                msg_id, self._extract_image_key(content_obj, content_raw)
+            image_paths = self._cache_recent_image_message(
+                chat_id,
+                msg_id,
+                content_obj,
+                content_raw,
             )
-            if img_path:
-                self._cache_recent_file_path(chat_id, img_path)
-            content = f"[图片] {img_path or ''}"
+            img_path = image_paths[-1] if image_paths else None
             self.msg_logger.info(f"Image downloaded: {img_path}")
+            self.audit.write(
+                "image_cached",
+                chat_id=chat_id,
+                sender=sender,
+                count=len(image_paths),
+            )
+            return
         elif msg_type == "audio":
             transcribed = self._process_audio(msg_id, content_obj)
             if transcribed:
                 content = transcribed
                 self.msg_logger.info(f"Audio transcribed: {transcribed[:100]}...")
             else:
-                content = "[语音消息]"
+                content = "[\u8bed\u97f3\u6d88\u606f]"
         elif msg_type == "file":
             recent = self._recent_files_by_chat.get(chat_id)
             recent_files = [str(path) for path in (recent or {}).get("files", [])]
             file_info = recent_files[-1] if recent_files else self._process_file(msg_id, content_obj)
             if file_info:
                 self._cache_recent_file_path(chat_id, file_info)
-            content = f"[文件] {file_info or ''}"
+            content = f"[\u6587\u4ef6] {file_info or ''}"
         elif msg_type == "post":
-            image_key = self._extract_post_image_key(content_obj) or self._extract_image_key(content_obj, content_raw)
-            if image_key:
-                img_path = self._download_image(msg_id, image_key)
-                if img_path:
-                    self._cache_recent_file_path(chat_id, img_path)
-                self.msg_logger.info(f"Post image downloaded: {img_path}")
+            image_paths = self._cache_recent_image_message(
+                chat_id,
+                msg_id,
+                content_obj,
+                content_raw,
+            )
+            img_path = image_paths[-1] if image_paths else None
+            if image_paths:
+                self.msg_logger.info(f"Post images downloaded: {len(image_paths)}")
             post_text = self._extract_post_text(content_obj)
             if not post_text and isinstance(content_raw, str):
                 post_text = re.sub(r"\[Image:\s*[^\]\s]+\]", "", content_raw).strip()
-            content = post_text or "[富文本消息]"
-            if img_path:
-                content = f"{content}\n[图片] {img_path}"
+            content = post_text or "[\u5bcc\u6587\u672c\u6d88\u606f]"
+            if image_paths:
+                image_lines = "\n".join(f"[图片] {path}" for path in image_paths)
+                content = f"{content}\n{image_lines}"
+            if image_paths and not post_text:
+                self.audit.write(
+                    "image_cached",
+                    chat_id=chat_id,
+                    sender=sender,
+                    count=len(image_paths),
+                )
+                return
 
         # Build prompt with rollover summary
         content = self._append_file_tool_hints(content)

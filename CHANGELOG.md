@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added continuous image context: bare image messages are cached without calling Claude, and follow-up text can process recent images together.
+- Added multi-image rich-text handling so all image paths are passed to Claude in one request.
 - Tightened group mention matching so messages that mention another bot no longer trigger this bridge.
 - Documented `bot_display_name` for exact group mention matching in multi-bot groups.
 - Added `start_ws.py` to manage the lark-cli event subscriber with an explicit profile per bridge.

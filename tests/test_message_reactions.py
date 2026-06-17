@@ -83,6 +83,41 @@ def make_post_image_marker_event(chat_id="oc_1", sender="ou_1"):
     }
 
 
+def make_multi_post_image_marker_event(chat_id="oc_1", sender="ou_1"):
+    return {
+        "event": {
+            "sender": {"sender_id": {"user_id": sender, "name": "tester"}},
+            "message": {
+                "message_id": "om_post_multi",
+                "chat_type": "p2p",
+                "chat_id": chat_id,
+                "message_type": "post",
+                "content": (
+                    "[Image: img_v3_multi_1]\n"
+                    "[Image: img_v3_multi_2]\n"
+                    "\u8bfb\u53d6\u56fe\u7247\u5185\u7269\u6d41\u7801"
+                ),
+            },
+        }
+    }
+
+
+def make_group_image_marker_event(chat_id="oc_group", sender="ou_1"):
+    return {
+        "event": {
+            "sender": {"sender_id": {"user_id": sender, "name": "tester"}},
+            "message": {
+                "message_id": "om_group_image",
+                "chat_type": "group",
+                "chat_id": chat_id,
+                "message_type": "image",
+                "content": "[Image: img_v3_group_marker]",
+                "mentions": [],
+            },
+        }
+    }
+
+
 def test_process_post_event_downloads_embedded_image_and_passes_path_to_claude(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     calls = []
@@ -102,7 +137,7 @@ def test_process_post_event_downloads_embedded_image_and_passes_path_to_claude(t
     assert any(call[0] == "claude" and "For images, inspect the local image directly" in call[1] for call in calls)
 
 
-def test_process_image_marker_event_downloads_image_key_from_lark_cli(tmp_path, monkeypatch):
+def test_process_image_marker_event_caches_image_without_calling_claude(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     calls = []
     image_path = tmp_path / "image.png"
@@ -111,13 +146,131 @@ def test_process_image_marker_event_downloads_image_key_from_lark_cli(tmp_path, 
     monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: "r_1")
     monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: True)
     monkeypatch.setattr(bridge, "_download_image", lambda message_id, image_key: calls.append(("download", message_id, image_key)) or str(image_path))
-    monkeypatch.setattr(bridge, "_call_claude", lambda prompt, *args, **kwargs: calls.append(("claude", prompt)) or ("reply", "sid_1"))
-    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+    monkeypatch.setattr(bridge, "_call_claude", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Claude should not be called for a bare image")))
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bare image should not send a reply")))
 
     bridge._process_event(make_image_marker_event())
 
     assert ("download", "om_image", "img_v3_marker") in calls
-    assert any(call[0] == "claude" and str(image_path) in call[1] for call in calls)
+    assert bridge._recent_files_by_chat["oc_1"]["files"] == [str(image_path.resolve())]
+
+
+def test_followup_after_bare_images_uses_all_cached_image_paths_once(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    image_1 = tmp_path / "image-1.png"
+    image_2 = tmp_path / "image-2.png"
+    image_1.write_bytes(b"fake image 1")
+    image_2.write_bytes(b"fake image 2")
+    prompts = []
+
+    def fake_download(message_id, image_key):
+        return str(image_1 if image_key.endswith("_1") else image_2)
+
+    monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: "r_1")
+    monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: True)
+    monkeypatch.setattr(bridge, "_download_image", fake_download)
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("reply", "sid_1"),
+    )
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event(
+        make_image_marker_event()
+        | {
+            "event": {
+                "sender": {"sender_id": {"user_id": "ou_1", "name": "tester"}},
+                "message": {
+                    "message_id": "om_image_1",
+                    "chat_type": "p2p",
+                    "chat_id": "oc_1",
+                    "message_type": "image",
+                    "content": "[Image: img_v3_marker_1]",
+                },
+            }
+        }
+    )
+    bridge._process_event(
+        make_image_marker_event()
+        | {
+            "event": {
+                "sender": {"sender_id": {"user_id": "ou_1", "name": "tester"}},
+                "message": {
+                    "message_id": "om_image_2",
+                    "chat_type": "p2p",
+                    "chat_id": "oc_1",
+                    "message_type": "image",
+                    "content": "[Image: img_v3_marker_2]",
+                },
+            }
+        }
+    )
+
+    assert prompts == []
+
+    bridge._process_event(
+        make_text_event(text="\u8bfb\u53d6\u521a\u624d\u56fe\u7247\u8fdb\u884c\u7269\u6d41\u7801\u67e5\u8be2")
+    )
+
+    assert len(prompts) == 1
+    assert "bridge_recent_file" in prompts[0]
+    assert str(image_1.resolve()) in prompts[0]
+    assert str(image_2.resolve()) in prompts[0]
+
+
+def test_group_unmentioned_image_is_cached_without_reply(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    image_path = tmp_path / "group-image.png"
+    image_path.write_bytes(b"fake image")
+
+    monkeypatch.setattr(bridge, "_download_image", lambda message_id, image_key: str(image_path))
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Claude should not be called for an unmentioned group image")
+        ),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_reply",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unmentioned group image should not send a reply")
+        ),
+    )
+
+    bridge._process_event(make_group_image_marker_event())
+
+    assert bridge._recent_files_by_chat["oc_group"]["files"] == [str(image_path.resolve())]
+
+
+def test_multi_image_post_passes_every_image_path_to_claude(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    image_1 = tmp_path / "multi-1.png"
+    image_2 = tmp_path / "multi-2.png"
+    image_1.write_bytes(b"fake image 1")
+    image_2.write_bytes(b"fake image 2")
+    prompts = []
+
+    def fake_download(message_id, image_key):
+        return str(image_1 if image_key.endswith("_1") else image_2)
+
+    monkeypatch.setattr(bridge, "_add_message_reaction", lambda message_id: "r_1")
+    monkeypatch.setattr(bridge, "_delete_message_reaction", lambda message_id, reaction_id: True)
+    monkeypatch.setattr(bridge, "_download_image", fake_download)
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("reply", "sid_1"),
+    )
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event(make_multi_post_image_marker_event())
+
+    assert len(prompts) == 1
+    assert str(image_1.resolve()) in prompts[0]
+    assert str(image_2.resolve()) in prompts[0]
 
 
 def test_process_post_image_marker_event_downloads_image_key_from_lark_cli(tmp_path, monkeypatch):
