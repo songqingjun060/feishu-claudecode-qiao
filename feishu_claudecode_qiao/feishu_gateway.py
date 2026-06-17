@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -43,6 +45,64 @@ class FeishuGateway(Protocol):
 
     def delete_reaction(self, message_id: str, reaction_id: str) -> bool:
         """删除消息上的表情反应。"""
+
+
+@runtime_checkable
+class FeishuEventSubscriber(Protocol):
+    """飞书事件订阅生命周期边界。"""
+
+    def start(self, *, force: bool = False) -> bool:
+        """启动当前配置绑定的事件订阅。"""
+
+    def stop(self) -> bool:
+        """停止当前配置绑定的事件订阅。"""
+
+    def restart(self, *, force: bool = False) -> bool:
+        """重启当前配置绑定的事件订阅。"""
+
+    def status(self) -> bool:
+        """返回当前配置绑定的事件订阅是否健康。"""
+
+
+class StartWsEventSubscriber:
+    """当前 lark-cli/start_ws.py 事件订阅适配器。"""
+
+    def __init__(self, config_path: str | Path, profile: str):
+        self.config_path = Path(config_path).expanduser().resolve()
+        self.profile = profile
+        self.script = Path(__file__).resolve().parents[1] / "start_ws.py"
+
+    def _run(self, action: str, *, force: bool = False) -> bool:
+        args = [
+            sys.executable,
+            str(self.script),
+            action,
+            "--config",
+            str(self.config_path),
+            "--profile",
+            self.profile,
+        ]
+        if force:
+            args.append("--force")
+        result = subprocess.run(
+            args,
+            cwd=self.script.parent,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def start(self, *, force: bool = False) -> bool:
+        return self._run("start", force=force)
+
+    def stop(self) -> bool:
+        return self._run("stop")
+
+    def restart(self, *, force: bool = False) -> bool:
+        return self._run("restart", force=force)
+
+    def status(self) -> bool:
+        return self._run("status")
 
 
 class CurrentFeishuGateway:

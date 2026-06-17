@@ -303,7 +303,12 @@ Claude 偶发 `api error: 500` 或 `internal server error` 时，桥会优先把
 
 ## 飞书 SDK 迁移策略
 
-当前默认链路继续使用已经跑通的 HTTP 调用和 `lark-cli` 事件订阅。后续接入官方飞书 SDK 时，应先在桥内部增加 `FeishuGateway` 边界，把发送消息、回复消息、上传文件、下载文件、添加表情回应和删除表情回应封装到同一个接口后面。
+当前默认链路继续使用已经跑通的 HTTP 调用和 `lark-cli` 事件订阅。后续接入官方飞书 SDK 时，需要同时保留两层边界：
+
+- `FeishuGateway`：封装发送消息、回复消息、上传文件、下载文件、添加表情回应和删除表情回应。
+- `FeishuEventSubscriber`：封装事件订阅的 `start`、`stop`、`restart`、`status` 生命周期。
+
+官方 SDK 后端不能绕开 `FeishuEventSubscriber` 直接启动事件流。无论底层是 `lark-cli` 还是 `lark-oapi` WebSocket，都必须继续遵守 `config.toml + bridge.data_dir + bridge.ws_profile` 的一对一绑定，保证桥停止时事件订阅停止、桥重启时事件订阅重启、订阅连续恢复失败时桥退出。
 
 SDK 后端应作为实验性实现逐步接入，默认不改变生产行为。只有网关测试稳定、现有 HTTP 后端保持兼容，并且可以按配置显式切换后，才切换到 `lark-oapi` 或其他官方 SDK 实现。
 

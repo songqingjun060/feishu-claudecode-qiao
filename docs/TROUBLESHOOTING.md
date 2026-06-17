@@ -187,12 +187,13 @@ data/logs/messages.log
 
 ## 飞书 SDK 迁移相关问题
 
-当前稳定链路仍是 HTTP 调用加 `lark-cli` 事件订阅。后续迁移官方飞书 SDK 时，应先通过 `FeishuGateway` 边界并行接入，保持默认后端不变。
+当前稳定链路仍是 HTTP 调用加 `lark-cli` 事件订阅。后续迁移官方飞书 SDK 时，应同时通过 `FeishuGateway` 和 `FeishuEventSubscriber` 两个边界并行接入，保持默认后端不变。
 
 排查 SDK 实验后端时，优先确认：
 
 - 默认 HTTP 后端是否仍可工作。
 - 发送、回复、上传、下载、表情回应能力是否都有网关测试覆盖。
+- SDK WebSocket 是否实现 `FeishuEventSubscriber.start/stop/restart/status`，并继续遵守 `config.toml + data_dir + ws_profile` 的一对一生命周期绑定。
 - 是否只有显式配置后才切换到 SDK 后端。
 - 失败时是否能快速切回当前 HTTP 和 `lark-cli` 链路。
 

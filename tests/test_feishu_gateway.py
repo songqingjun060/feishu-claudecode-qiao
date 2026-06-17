@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from feishu_claudecode_qiao.feishu_gateway import CurrentFeishuGateway, FeishuGateway
+from feishu_claudecode_qiao.feishu_gateway import (
+    CurrentFeishuGateway,
+    FeishuEventSubscriber,
+    FeishuGateway,
+    StartWsEventSubscriber,
+)
 
 
 class RecordingBridge:
@@ -83,3 +88,34 @@ def test_download_file_rejects_non_image_until_bridge_has_generic_download():
 
     with pytest.raises(NotImplementedError):
         gateway.download_file("om_1", "file_v1", resource_type="file")
+
+
+def test_start_ws_event_subscriber_satisfies_subscriber_protocol(tmp_path):
+    subscriber = StartWsEventSubscriber(tmp_path / "config.toml", "qiao-test")
+
+    assert isinstance(subscriber, FeishuEventSubscriber)
+
+
+def test_start_ws_event_subscriber_delegates_lifecycle_to_start_ws(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return type("Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+    monkeypatch.setattr("feishu_claudecode_qiao.feishu_gateway.subprocess.run", fake_run)
+
+    subscriber = StartWsEventSubscriber(tmp_path / "config.toml", "qiao-test")
+
+    assert subscriber.start(force=True) is True
+    assert subscriber.stop() is True
+    assert subscriber.restart(force=True) is True
+    assert subscriber.status() is True
+
+    actions = [call[0][2] for call in calls]
+    assert actions == ["start", "stop", "restart", "status"]
+    for args, _ in calls:
+        assert "--config" in args
+        assert str((tmp_path / "config.toml").resolve()) in args
+        assert "--profile" in args
+        assert "qiao-test" in args

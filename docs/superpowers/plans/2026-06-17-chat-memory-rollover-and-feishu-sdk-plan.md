@@ -22,6 +22,7 @@
 
 第二阶段为飞书 SDK 迁移做准备：
 - 在现有发送、上传、下载、表情反应能力外包一层 `FeishuGateway`。
+- 在事件订阅侧增加 `FeishuEventSubscriber`，统一 `start`、`stop`、`restart`、`status` 生命周期。
 - 当前 HTTP 和 `lark-cli` 实现继续作为默认方案。
 - 只有网关测试稳定后，再增加实验性的 `lark-oapi` 后端。
 
@@ -255,11 +256,12 @@ python -m pytest tests/test_session_store.py tests/test_bridge_rollover.py tests
 
 ---
 
-## 任务 5：增加 FeishuGateway 边界，但暂不切换后端
+## 任务 5：增加 FeishuGateway 和事件订阅边界，但暂不切换后端
 
 **文件：**
 - 新建：`feishu_claudecode_qiao/feishu_gateway.py`
 - 修改：`feishu_claudecode_qiao/bridge.py`
+- 修改：`start_ws.py`
 - 测试：`tests/test_feishu_gateway.py`
 
 - [ ] **步骤 1：定义网关协议**
@@ -276,13 +278,26 @@ class FeishuGateway:
     def delete_reaction(self, message_id: str, reaction: str) -> None: ...
 ```
 
+同时定义事件订阅生命周期协议：
+
+```python
+class FeishuEventSubscriber:
+    def start(self, *, force: bool = False) -> bool: ...
+    def stop(self) -> bool: ...
+    def restart(self, *, force: bool = False) -> bool: ...
+    def status(self) -> bool: ...
+```
+
 - [ ] **步骤 2：包装当前实现**
 
 把现有桥里的 HTTP 调用挪到 `CurrentFeishuGateway` 后面。
 
+把当前 `lark-cli`/`start_ws.py` 事件订阅包装到 `StartWsEventSubscriber` 后面。后续官方 SDK WebSocket 后端必须实现同一协议，不能绕过桥和 WebSocket 的一对一生命周期绑定。
+
 - [ ] **步骤 3：保持行为不变**
 
 桥仍然使用当前配置、`lark-cli` 事件文件和当前 token 流程。
+事件订阅仍然按 `config.toml + bridge.data_dir + bridge.ws_profile` 绑定：桥停则订阅停，桥重启则订阅重启，订阅连续恢复失败则桥退出。
 
 - [ ] **步骤 4：运行全量测试**
 
@@ -351,6 +366,7 @@ python -m pytest -q
 - 已经清空过 `session_id` 的对话可能还会新开一次 Claude session，但长期记忆会保留。
 - 不应提交真实的 `config.realtest.toml`、日志、运行数据或密钥。
 - 第二阶段 SDK 工作默认不改变生产行为，只有显式启用后才切换。
+- SDK 事件订阅后端必须复用 `FeishuEventSubscriber` 生命周期，不允许另起一个脱离桥管理的 WebSocket 常驻进程。
 
 ## 开源项目对比备注
 
@@ -365,4 +381,5 @@ python -m pytest -q
 - 让 Claude Code CLI 负责真正的代码、文档、表格、PDF、压缩包和本地工具调用。
 - 稳定的文件、图片、语音上下文交接。
 - Windows 前台可见运行和 WebSocket 守护。
+- 桥和 WebSocket 订阅的一对一生命周期绑定。
 - 每个对话框独立的长期记忆和受控注入。
