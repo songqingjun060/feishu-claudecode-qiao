@@ -64,6 +64,40 @@ data_dir = "{data_dir.as_posix()}"
     assert results["websocket_pid"]["level"] == "warning"
 
 
+def test_doctor_requires_websocket_metadata_to_match_config(tmp_path, monkeypatch):
+    import json
+    import os
+
+    config = tmp_path / "config.toml"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    config.write_text(
+        f"""
+[bridge]
+data_dir = "{data_dir.as_posix()}"
+ws_profile = "qiao-test"
+""".strip(),
+        encoding="utf-8",
+    )
+    (data_dir / "feishu_ws.pid").write_text(str(os.getpid()), encoding="utf-8")
+    (data_dir / "feishu_ws.meta.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "profile": "other-profile",
+                "config_path": str(config.resolve()),
+                "data_dir": str(data_dir.resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    results = {item["check"]: item for item in run_doctor(str(config))}
+
+    assert results["websocket_pid"]["ok"] is False
+    assert "metadata" in results["websocket_pid"]["hint"].lower()
+
+
 def test_print_results_optional_failure_does_not_return_one():
     results = [
         {"check": "whisper", "ok": False, "level": "optional"},

@@ -45,6 +45,7 @@ class Config:
     bridge_bot_admins: list[str] = field(default_factory=list)
     bridge_ws_profile: str = "qiao-test"
     bridge_ws_watchdog_interval_seconds: int = 30
+    bridge_ws_max_restart_failures: int = 3
 
     # Security
     security_allowed_paths: list[str] = field(default_factory=list)
@@ -85,6 +86,7 @@ def _env_override(cfg: Config) -> Config:
         bridge_bot_admins=_get("FEISHUCLAUDECODE_BRIDGE_BOT_ADMINS", cfg.bridge_bot_admins),
         bridge_ws_profile=_get("FEISHUCLAUDECODE_BRIDGE_WS_PROFILE", cfg.bridge_ws_profile),
         bridge_ws_watchdog_interval_seconds=_get("FEISHUCLAUDECODE_BRIDGE_WS_WATCHDOG_INTERVAL_SECONDS", cfg.bridge_ws_watchdog_interval_seconds),
+        bridge_ws_max_restart_failures=_get("FEISHUCLAUDECODE_BRIDGE_WS_MAX_RESTART_FAILURES", cfg.bridge_ws_max_restart_failures),
         security_allowed_paths=_get("FEISHUCLAUDECODE_SECURITY_ALLOWED_PATHS", cfg.security_allowed_paths),
         security_blocked_keywords=_get("FEISHUCLAUDECODE_SECURITY_BLOCKED_KEYWORDS", cfg.security_blocked_keywords),
     )
@@ -123,6 +125,7 @@ def load_config(path: str | Path | None = None) -> Config:
             bridge_bot_admins=data.get("bridge", {}).get("bot_admins", []),
             bridge_ws_profile=data.get("bridge", {}).get("ws_profile", "qiao-test"),
             bridge_ws_watchdog_interval_seconds=data.get("bridge", {}).get("ws_watchdog_interval_seconds", 30),
+            bridge_ws_max_restart_failures=data.get("bridge", {}).get("ws_max_restart_failures", 3),
             security_allowed_paths=data.get("security", {}).get("allowed_paths", []),
             security_blocked_keywords=data.get("security", {}).get("blocked_keywords", []),
         )

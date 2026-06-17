@@ -1,8 +1,9 @@
 param(
     [string]$Config = "config.realtest.toml",
-    [string]$Profile = "qiao-test",
+    [string]$Profile = "",
     [switch]$Restart,
-    [switch]$Foreground
+    [switch]$Stop,
+    [switch]$Background
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +37,19 @@ print(Path(cfg.bridge_data_dir).resolve() / 'bridge.pid')
     return (python -c $code).Trim()
 }
 
+function Get-WsProfile {
+    param([string]$ConfigPath)
+    if ($Profile) {
+        return $Profile
+    }
+    $code = @"
+from feishu_claudecode_qiao.config import load_config
+cfg = load_config(r'''$ConfigPath''')
+print(cfg.bridge_ws_profile)
+"@
+    return (python -c $code).Trim()
+}
+
 function Test-PidRunning {
     param([string]$PidFile)
     if (-not (Test-Path -LiteralPath $PidFile)) {
@@ -57,37 +71,52 @@ Invoke-Step "Config" {
 }
 
 $bridgePidFile = Get-BridgePidFile -ConfigPath $Config
+$wsProfile = Get-WsProfile -ConfigPath $Config
 
-if ($Restart) {
+if ($Stop) {
     Invoke-Step "Stop bridge" {
         python -m feishu_claudecode_qiao --config $Config --stop
     }
+    Invoke-Step "Stop WebSocket subscriber" {
+        python start_ws.py stop --config $Config --profile $wsProfile
+        Assert-Ok "WebSocket subscriber stop failed"
+    }
+    Invoke-Step "Done" {
+        Write-Host "Bridge and WebSocket are stopped." -ForegroundColor Green
+    }
+    exit 0
+}
+
+if ($Restart) {
+    Invoke-Step "Stop bridge and paired WebSocket" {
+        python -m feishu_claudecode_qiao --config $Config --stop
+    }
     Invoke-Step "Restart WebSocket subscriber" {
-        python start_ws.py restart --config $Config --profile $Profile --force
+        python start_ws.py restart --config $Config --profile $wsProfile --force
         Assert-Ok "WebSocket subscriber restart failed"
     }
 } else {
     Invoke-Step "Ensure WebSocket subscriber" {
-        python start_ws.py status --config $Config
+        python start_ws.py status --config $Config --profile $wsProfile
         if ($LASTEXITCODE -ne 0) {
             throw "WebSocket subscriber status failed"
         }
         $wsPidFile = Join-Path (Split-Path -Parent $bridgePidFile) "feishu_ws.pid"
         if (-not (Test-PidRunning -PidFile $wsPidFile)) {
-            python start_ws.py start --config $Config --profile $Profile --force
+            python start_ws.py start --config $Config --profile $wsProfile --force
             Assert-Ok "WebSocket subscriber start failed"
         }
     }
 }
 
 Invoke-Step "WebSocket status" {
-    python start_ws.py status --config $Config
+    python start_ws.py status --config $Config --profile $wsProfile
     Assert-Ok "WebSocket subscriber status failed"
 }
 
-if ($Foreground) {
+if (-not $Background) {
     Invoke-Step "Start bridge in foreground" {
-        Write-Host "Press Ctrl+C to stop the bridge. The WebSocket subscriber stays managed by start_ws.py." -ForegroundColor Gray
+        Write-Host "Press Ctrl+C to stop the bridge. The paired WebSocket subscriber will be stopped with it." -ForegroundColor Gray
         python -m feishu_claudecode_qiao --config $Config
     }
     exit $LASTEXITCODE
@@ -109,6 +138,6 @@ Invoke-Step "Done" {
     Write-Host "New bridge is ready." -ForegroundColor Green
     Write-Host "Use this to restart everything:"
     Write-Host "  .\start_all.ps1 -Restart"
-    Write-Host "Use this for visible foreground logs:"
-    Write-Host "  .\start_all.ps1 -Restart -Foreground"
+    Write-Host "Use this for hidden background mode:"
+    Write-Host "  .\start_all.ps1 -Restart -Background"
 }

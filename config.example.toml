@@ -20,6 +20,7 @@ bot_display_name = ""
 personal_permission_profile = "admin"
 ws_profile = "qiao-test"
 ws_watchdog_interval_seconds = 30
+ws_max_restart_failures = 3
 # If bot_admins is empty, bot_owner_id is the only user allowed to change group rules.
 bot_owner_id = ""
 bot_admins = []

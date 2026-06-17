@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added one-to-one bridge/WebSocket lifecycle binding with profile metadata, paired stop/restart, and foreground-first startup.
 - Added continuous image context: bare image messages are cached without calling Claude, and follow-up text can process recent images together.
 - Added multi-image rich-text handling so all image paths are passed to Claude in one request.
 - Tightened group mention matching so messages that mention another bot no longer trigger this bridge.

@@ -95,15 +95,32 @@ def run_doctor(config_path: str = "config.toml") -> list[dict[str, Any]]:
     )
 
     ws_pid_file = data_dir / "feishu_ws.pid"
+    ws_meta_file = data_dir / "feishu_ws.meta.json"
     ws_ok = False
-    ws_hint = "未找到 PID 文件"
+    ws_hint = "??? PID ??"
     if ws_pid_file.exists():
         try:
             pid = int(ws_pid_file.read_text(encoding="utf-8").strip())
-            ws_ok = _pid_running(pid)
-            ws_hint = f"PID {pid} {'运行中' if ws_ok else '未运行'}"
+            pid_ok = _pid_running(pid)
+            meta_ok = False
+            if ws_meta_file.exists():
+                try:
+                    meta = json.loads(ws_meta_file.read_text(encoding="utf-8"))
+                    meta_ok = (
+                        int(meta.get("pid", 0)) == pid
+                        and meta.get("profile") == cfg.bridge_ws_profile
+                        and str(Path(str(meta.get("config_path", ""))).resolve()) == str(Path(config_path).resolve())
+                        and str(Path(str(meta.get("data_dir", ""))).resolve()) == str(data_dir)
+                    )
+                except Exception:
+                    meta_ok = False
+            ws_ok = pid_ok and meta_ok
+            if pid_ok and not meta_ok:
+                ws_hint = f"PID {pid} running but metadata does not match config/profile"
+            else:
+                ws_hint = f"PID {pid} {'???' if ws_ok else '???'}"
         except Exception as e:
-            ws_hint = f"PID 文件无效: {e}"
+            ws_hint = f"PID ????: {e}"
     results.append({"check": "websocket_pid", "ok": ws_ok, "level": "warning", "hint": ws_hint})
 
     try:

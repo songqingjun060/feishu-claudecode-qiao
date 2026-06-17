@@ -60,11 +60,85 @@ def test_websocket_watchdog_starts_subscriber_when_pid_missing(tmp_path, monkeyp
     assert "qiao-test" in args
 
 
+def test_websocket_watchdog_exits_after_repeated_restart_failures(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+            bridge_ws_profile="qiao-test",
+            bridge_ws_max_restart_failures=2,
+        ),
+        config_path=config_path,
+    )
+
+    monkeypatch.setattr(
+        "feishu_claudecode_qiao.bridge.subprocess.run",
+        lambda *args, **kwargs: type("Result", (), {"returncode": 1, "stdout": "", "stderr": "boom"})(),
+    )
+
+    bridge._check_websocket_watchdog(force=True)
+    try:
+        bridge._check_websocket_watchdog(force=True)
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("bridge should exit after repeated WebSocket restart failures")
+
+
+def test_stop_managed_websocket_calls_start_ws_stop(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+            bridge_ws_profile="qiao-test",
+        ),
+        config_path=config_path,
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        "feishu_claudecode_qiao.bridge.subprocess.run",
+        lambda args, **kwargs: calls.append((args, kwargs))
+        or type("Result", (), {"returncode": 0, "stdout": "stopped", "stderr": ""})(),
+    )
+
+    bridge._stop_managed_websocket()
+
+    assert calls
+    args = calls[0][0]
+    assert args[:3] == [
+        sys.executable,
+        str(Path(__file__).resolve().parents[1] / "start_ws.py"),
+        "stop",
+    ]
+    assert "--config" in args
+    assert str(config_path) in args
+    assert "--profile" in args
+    assert "qiao-test" in args
+
+
 def test_websocket_watchdog_does_not_start_when_pid_running(tmp_path, monkeypatch):
     config_path = tmp_path / "config.toml"
     config_path.write_text("", encoding="utf-8")
     pid_file = tmp_path / "feishu_ws.pid"
     pid_file.write_text(str(os.getpid()), encoding="utf-8")
+    (tmp_path / "feishu_ws.meta.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "profile": "qiao-test",
+                "config_path": str(config_path.resolve()),
+                "data_dir": str(tmp_path.resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
     bridge = Bridge(
         Config(
             feishu_app_id="cli_test",

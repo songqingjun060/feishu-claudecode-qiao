@@ -128,6 +128,7 @@ class Bridge:
         self.data_dir = Path(config.bridge_data_dir).resolve()
         self.pid_file = self.data_dir / "bridge.pid"
         self.ws_pid_file = self.data_dir / "feishu_ws.pid"
+        self.ws_meta_file = self.data_dir / "feishu_ws.meta.json"
         self.sessions_file = self.data_dir / "sessions.json"
         self.ws_events_file = self.data_dir / "logs" / "feishu_ws_events.jsonl"
         self.images_dir = self.data_dir / "images"
@@ -152,6 +153,7 @@ class Bridge:
         self._processed_ids: set[str] = set()
         self._last_ws_watchdog_check = 0.0
         self._last_ws_watchdog_restart = 0.0
+        self._ws_watchdog_failures = 0
         self._recent_audio_by_chat: dict[str, dict[str, Any]] = {}
         self._recent_files_by_chat: dict[str, dict[str, Any]] = {}
         drive_roots = [Path(f"{chr(letter)}:/") for letter in range(ord("A"), ord("Z") + 1)]
@@ -1067,6 +1069,61 @@ class Bridge:
         except OSError:
             return False
 
+    def _ws_meta_matches(self) -> bool:
+        if not self.ws_meta_file.exists():
+            return False
+        try:
+            meta = json.loads(self.ws_meta_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        expected_config = str(self.config_path or Path("config.toml").resolve())
+        try:
+            meta_config = str(Path(str(meta.get("config_path", ""))).resolve())
+            meta_data_dir = str(Path(str(meta.get("data_dir", ""))).resolve())
+        except (OSError, ValueError):
+            return False
+        return (
+            meta.get("profile") == (getattr(self.config, "bridge_ws_profile", "qiao-test") or "qiao-test")
+            and meta_config == str(Path(expected_config).resolve())
+            and meta_data_dir == str(self.data_dir)
+        )
+
+    def _managed_ws_running(self) -> bool:
+        return self._ws_pid_running() and self._ws_meta_matches()
+
+    def _start_ws_args(self, action: str) -> list[str]:
+        config_arg = str(self.config_path or Path("config.toml").resolve())
+        profile = getattr(self.config, "bridge_ws_profile", "qiao-test") or "qiao-test"
+        args = [
+            sys.executable,
+            str(_WORK_DIR / "start_ws.py"),
+            action,
+            "--config",
+            config_arg,
+            "--profile",
+            profile,
+        ]
+        if action in {"start", "restart"}:
+            args.append("--force")
+        return args
+
+    def _stop_managed_websocket(self) -> None:
+        result = subprocess.run(
+            self._start_ws_args("stop"),
+            cwd=_WORK_DIR,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            self.bridge_logger.info(
+                f"WebSocket subscriber stopped with bridge: {result.stdout.strip()}"
+            )
+        else:
+            self.bridge_logger.warning(
+                "WebSocket subscriber stop failed: "
+                f"code={result.returncode} stdout={result.stdout[:500]} stderr={result.stderr[:500]}"
+            )
+
     def _check_websocket_watchdog(self, *, force: bool = False) -> None:
         interval = int(getattr(self.config, "bridge_ws_watchdog_interval_seconds", 30) or 0)
         if interval <= 0:
@@ -1076,44 +1133,41 @@ class Bridge:
             return
         self._last_ws_watchdog_check = now
 
-        if self._ws_pid_running():
+        if self._managed_ws_running():
+            self._ws_watchdog_failures = 0
             return
 
         if not force and now - self._last_ws_watchdog_restart < max(interval, 60):
             return
         self._last_ws_watchdog_restart = now
 
-        config_arg = str(self.config_path or Path("config.toml").resolve())
         profile = getattr(self.config, "bridge_ws_profile", "qiao-test") or "qiao-test"
-        script = _WORK_DIR / "start_ws.py"
-        args = [
-            sys.executable,
-            str(script),
-            "start",
-            "--config",
-            config_arg,
-            "--profile",
-            profile,
-            "--force",
-        ]
         self.bridge_logger.warning(
             f"WebSocket subscriber is not running; starting profile={profile}"
         )
         result = subprocess.run(
-            args,
+            self._start_ws_args("start"),
             cwd=_WORK_DIR,
             capture_output=True,
             text=True,
         )
         if result.returncode == 0:
+            self._ws_watchdog_failures = 0
             self.bridge_logger.info(
                 f"WebSocket subscriber restarted by watchdog: {result.stdout.strip()}"
             )
         else:
+            self._ws_watchdog_failures += 1
             self.bridge_logger.error(
                 "WebSocket subscriber watchdog start failed: "
                 f"code={result.returncode} stdout={result.stdout[:500]} stderr={result.stderr[:500]}"
             )
+            max_failures = int(getattr(self.config, "bridge_ws_max_restart_failures", 3) or 0)
+            if max_failures > 0 and self._ws_watchdog_failures >= max_failures:
+                self.bridge_logger.error(
+                    "WebSocket subscriber restart failed repeatedly; stopping bridge"
+                )
+                raise SystemExit(2)
 
     def run(self) -> None:
         """Main loop: read events file -> process -> sleep."""
@@ -1174,6 +1228,7 @@ class Bridge:
             self.bridge_logger.info("Stopping...")
         finally:
             self._save_sessions()
+            self._stop_managed_websocket()
             _remove_pid(self.pid_file)
             self.bridge_logger.info("Bridge stopped.")
 
@@ -2910,6 +2965,7 @@ def main() -> None:
 
     if args.stop:
         _stop_bridge(pid_file)
+        Bridge(config, config_path=config_path)._stop_managed_websocket()
         return
 
     # Check if already running

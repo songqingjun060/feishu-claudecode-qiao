@@ -106,6 +106,9 @@ log_level = "INFO"
 max_upload_mb = 20
 require_mention_in_group = true
 bot_display_name = "your-bot-display-name"
+ws_profile = "qiao-test"
+ws_watchdog_interval_seconds = 30
+ws_max_restart_failures = 3
 personal_permission_profile = "admin"
 bot_owner_id = ""
 bot_admins = []
@@ -232,30 +235,25 @@ default -> chat -> member -> temporary
 
 ## 启动
 
-启动或重启飞书事件订阅：
-
-```bash
-python start_ws.py restart --config config.toml --profile qiao-test
-```
-
-启动桥服务：
-
-```bash
-python -m feishu_claudecode_qiao --config config.toml
-```
-
-Windows 推荐使用前台窗口运行，便于观察日志：
+Windows 默认使用前台窗口运行，便于观察日志。推荐通过一键脚本启动或重启，它会按同一个配置绑定桥和 WebSocket 订阅：
 
 ```powershell
-.\run_foreground.ps1 -Config config.toml -Profile qiao-test
-```
-
-Windows 一键启动或重启：
-
-```powershell
-.\start_all.ps1
+Set-Location -LiteralPath D:\feishu-claudecode-qiao
 .\start_all.ps1 -Restart
-.\start_all.ps1 -Restart -Foreground
+```
+
+如果明确需要隐藏后台运行：
+
+```powershell
+.\start_all.ps1 -Restart -Background
+```
+
+桥和 WebSocket 订阅按同一个 `config.toml`、`bridge.data_dir`、`bridge.ws_profile` 绑定。桥停止时会停止对应 WebSocket；桥重启时会重启对应 WebSocket；桥运行中发现对应 WebSocket 死掉会先自动拉起，连续失败达到 `ws_max_restart_failures` 后才停止桥，避免多机器人环境互相影响。
+
+如果只想手动管理 WebSocket，可使用：
+
+```powershell
+python start_ws.py restart --config config.toml --profile qiao-test
 ```
 
 查看状态：
@@ -267,8 +265,7 @@ python -m feishu_claudecode_qiao --config config.toml --status
 停止：
 
 ```bash
-python start_ws.py stop --config config.toml
-python -m feishu_claudecode_qiao --config config.toml --stop
+.\start_all.ps1 -Stop
 ```
 
 环境自检：

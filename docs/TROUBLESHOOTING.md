@@ -19,8 +19,10 @@
 ```bash
 python -m feishu_claudecode_qiao --config config.toml --status
 python -m feishu_claudecode_qiao --config config.toml --doctor
-python start_ws.py status --config config.toml
+python start_ws.py status --config config.toml --profile qiao-test
 ```
+
+多机器人并行时，每个桥必须使用独立的 `bridge.data_dir` 和对应的 `bridge.ws_profile`。`feishu_ws.meta.json` 会记录当前 WebSocket 属于哪个 config/profile；如果状态检查显示 metadata 不匹配，说明当前桥不应该接管那个 WebSocket，请用对应配置执行 `.\start_all.ps1 -Restart`。
 
 如果 @ 了别的机器人但本桥也回复，请升级到包含精确 mention 匹配的版本。旧版本可能只检查 `mentioned_type = bot`，没有校验具体机器人。
 

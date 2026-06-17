@@ -34,10 +34,15 @@ def _config_data_dir(config_path: str | Path) -> Path:
     return Path(load_config(config_path).bridge_data_dir).resolve()
 
 
-def _paths(config_path: str | Path) -> tuple[Path, Path, Path]:
+def _resolved_config_path(config_path: str | Path) -> Path:
+    return Path(config_path).expanduser().resolve()
+
+
+def _paths(config_path: str | Path) -> tuple[Path, Path, Path, Path]:
     data_dir = _config_data_dir(config_path)
     return (
         data_dir / "feishu_ws.pid",
+        data_dir / "feishu_ws.meta.json",
         data_dir / "logs" / "feishu_ws_events.jsonl",
         data_dir / "logs" / "feishu_ws.log",
     )
@@ -106,28 +111,76 @@ def _kill_profile_subscribers(profile: str) -> None:
         print(f"[OK] Stopped stale {profile} subscribers: {', '.join(killed)}")
 
 
-def is_running(config_path: str | Path) -> bool:
-    pid_file, _, _ = _paths(config_path)
+def _expected_meta(config_path: str | Path, profile: str) -> dict[str, str]:
+    data_dir = _config_data_dir(config_path)
+    return {
+        "profile": profile,
+        "config_path": str(_resolved_config_path(config_path)),
+        "data_dir": str(data_dir),
+    }
+
+
+def _meta_matches(config_path: str | Path, profile: str, pid: int) -> bool:
+    _, meta_file, _, _ = _paths(config_path)
+    if not meta_file.exists():
+        return False
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    expected = _expected_meta(config_path, profile)
+    return (
+        int(meta.get("pid", 0)) == pid
+        and meta.get("profile") == expected["profile"]
+        and str(Path(meta.get("config_path", "")).resolve()) == expected["config_path"]
+        and str(Path(meta.get("data_dir", "")).resolve()) == expected["data_dir"]
+    )
+
+
+def _write_meta(config_path: str | Path, profile: str, pid: int) -> None:
+    _, meta_file, _, _ = _paths(config_path)
+    meta_file.parent.mkdir(parents=True, exist_ok=True)
+    meta = {
+        **_expected_meta(config_path, profile),
+        "pid": pid,
+        "started_at": time.time(),
+    }
+    meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def is_running(config_path: str | Path, profile: str | None = None) -> bool:
+    pid_file, _, _, _ = _paths(config_path)
     if not pid_file.exists():
         return False
     try:
-        return _pid_running(int(pid_file.read_text(encoding="utf-8").strip()))
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return False
+    if not _pid_running(pid):
+        return False
+    if profile is None:
+        return True
+    return _meta_matches(config_path, profile, pid)
 
 
-def stop(config_path: str | Path) -> int:
-    pid_file, _, _ = _paths(config_path)
+def stop(config_path: str | Path, profile: str | None = None) -> int:
+    pid_file, meta_file, _, _ = _paths(config_path)
     if not pid_file.exists():
         print("[INFO] WebSocket subscriber is not running")
+        meta_file.unlink(missing_ok=True)
         return 0
 
     try:
         pid = int(pid_file.read_text(encoding="utf-8").strip())
     except ValueError:
         pid_file.unlink(missing_ok=True)
+        meta_file.unlink(missing_ok=True)
         print("[WARN] Removed invalid PID file")
         return 0
+
+    if profile is not None and _pid_running(pid) and not _meta_matches(config_path, profile, pid):
+        print(f"[WARN] PID {pid} metadata does not match profile={profile}; not stopping it")
+        return 1
 
     if _pid_running(pid):
         if sys.platform == "win32":
@@ -138,17 +191,18 @@ def stop(config_path: str | Path) -> int:
     else:
         print(f"[INFO] PID {pid} is not running")
     pid_file.unlink(missing_ok=True)
+    meta_file.unlink(missing_ok=True)
     return 0
 
 
 def start(config_path: str | Path, profile: str, force: bool) -> int:
-    pid_file, output_file, log_file = _paths(config_path)
+    pid_file, _, output_file, log_file = _paths(config_path)
     if force:
         _kill_profile_subscribers(profile)
         time.sleep(1)
-    if is_running(config_path):
+    if is_running(config_path, profile=profile):
         print("[WARN] Existing WebSocket subscriber found; stopping it first")
-        stop(config_path)
+        stop(config_path, profile=profile)
         time.sleep(1)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +232,7 @@ def start(config_path: str | Path, profile: str, force: bool) -> int:
         env=_lark_env(),
     )
     pid_file.write_text(str(proc.pid), encoding="utf-8")
+    _write_meta(config_path, profile, proc.pid)
     print(f"[OK] WebSocket subscriber started PID={proc.pid}")
     print(f"[INFO] Profile: {profile}")
     print(f"[INFO] Output: {output_file}")
@@ -185,11 +240,20 @@ def start(config_path: str | Path, profile: str, force: bool) -> int:
     return 0
 
 
-def status(config_path: str | Path) -> int:
-    pid_file, output_file, log_file = _paths(config_path)
-    print("[OK] WebSocket subscriber is running" if is_running(config_path) else "[STOPPED] WebSocket subscriber is not running")
+def status(config_path: str | Path, profile: str | None = None) -> int:
+    pid_file, meta_file, output_file, log_file = _paths(config_path)
+    running = is_running(config_path, profile=profile)
+    print("[OK] WebSocket subscriber is running" if running else "[STOPPED] WebSocket subscriber is not running")
     if pid_file.exists():
         print(f"PID file: {pid_file} ({pid_file.read_text(encoding='utf-8').strip()})")
+    if meta_file.exists():
+        print(f"Meta file: {meta_file}")
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            print(f"Profile: {meta.get('profile')}")
+            print(f"Config: {meta.get('config_path')}")
+        except json.JSONDecodeError:
+            print("[WARN] WebSocket metadata is invalid JSON")
     for path in (output_file, log_file):
         if path.exists():
             print(f"{path}: {path.stat().st_size} bytes, updated {time.ctime(path.stat().st_mtime)}")
@@ -215,12 +279,12 @@ def main() -> int:
     if args.action == "start":
         return start(args.config, args.profile, args.force)
     if args.action == "stop":
-        return stop(args.config)
+        return stop(args.config, args.profile)
     if args.action == "restart":
-        stop(args.config)
+        stop(args.config, args.profile)
         time.sleep(1)
         return start(args.config, args.profile, args.force)
-    return status(args.config)
+    return status(args.config, args.profile)
 
 
 if __name__ == "__main__":
