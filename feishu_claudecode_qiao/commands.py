@@ -15,6 +15,7 @@ SUPPORTED_COMMANDS = {
     "context",
     "summary",
     "compact",
+    "rollover",
     "new",
     "reset",
     "workspace",

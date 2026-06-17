@@ -26,12 +26,13 @@ DEFAULT_RULE = {
     "context_policy": {
         "mode": "auto_rollover",
         "score_threshold": 100,
-        "soft_message_limit": 20,
-        "hard_message_limit": 35,
-        "ttl_hours": 72,
-        "min_messages_between_rollovers": 8,
-        "rollover_cooldown_hours": 2,
+        "soft_message_limit": 80,
+        "hard_message_limit": 120,
+        "ttl_hours": 168,
+        "min_messages_between_rollovers": 30,
+        "rollover_cooldown_hours": 12,
         "carry_summary": True,
+        "context_error_only": False,
     },
     "memory_policy": {
         "enabled": True,

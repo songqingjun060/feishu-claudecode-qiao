@@ -135,3 +135,66 @@ def test_process_event_retries_when_saved_claude_session_is_missing(tmp_path, mo
     assert calls == ["missing_sid", None]
     assert "final reply" in sent[-1]
     assert bridge.session_store.get("chat:oc_1").session_id == "new_sid"
+
+
+def test_call_claude_with_recovery_retries_transient_500(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    calls = []
+
+    def fake_call(prompt, sid, **kwargs):
+        calls.append(sid)
+        if len(calls) == 1:
+            return ("API Error: 500 500 Internal Server Error", sid)
+        return ("ok", "sid_1")
+
+    monkeypatch.setattr(bridge, "_call_claude", fake_call)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    reply, new_session = bridge._call_claude_with_recovery(
+        "prompt",
+        "sid_1",
+        "chat:c1",
+        resolve_rule({}),
+        cwd=str(tmp_path),
+        permission_mode="bypassPermissions",
+    )
+
+    assert calls == ["sid_1", "sid_1"]
+    assert reply == "ok"
+    assert new_session == "sid_1"
+
+
+def test_call_claude_with_recovery_rolls_over_on_context_limit(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sid_old")
+    calls = []
+    rollovers = []
+
+    def fake_call(prompt, sid, **kwargs):
+        calls.append((prompt, sid))
+        if len(calls) == 1:
+            return ("context length exceeded", sid)
+        return ("after rollover", "sid_new")
+
+    def fake_rollover(session_key, rule, force=False):
+        rollovers.append((session_key, force))
+        bridge.session_store.clear_session_id(session_key)
+        return "<chat_memory>memory</chat_memory>"
+
+    monkeypatch.setattr(bridge, "_call_claude", fake_call)
+    monkeypatch.setattr(bridge, "_maybe_rollover_session", fake_rollover)
+
+    reply, new_session = bridge._call_claude_with_recovery(
+        "prompt",
+        "sid_old",
+        "chat:c1",
+        resolve_rule({}),
+        cwd=str(tmp_path),
+        permission_mode="bypassPermissions",
+    )
+
+    assert rollovers == [("chat:c1", True)]
+    assert calls[1][1] is None
+    assert "<chat_memory>memory</chat_memory>" in calls[1][0]
+    assert reply == "after rollover"
+    assert new_session == "sid_new"

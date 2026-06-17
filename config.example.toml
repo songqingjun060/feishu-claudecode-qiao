@@ -27,3 +27,25 @@ bot_admins = []
 [security]
 allowed_paths = []
 blocked_keywords = []
+
+# 会话翻页和长期记忆策略目前来自默认会话规则和按会话规则文件。
+# 当前全局配置加载器不会读取单独的 [context_policy] 或 [memory_policy] 表；
+# 因此这里保留为注释示例，避免复制后误以为全局配置已经生效。
+#
+# context_policy 示例：
+# mode = "auto_rollover"
+# score_threshold = 100
+# soft_message_limit = 80
+# hard_message_limit = 120
+# ttl_hours = 168
+# min_messages_between_rollovers = 30
+# rollover_cooldown_hours = 12
+# carry_summary = true
+# context_error_only = false
+#
+# memory_policy 示例：
+# enabled = true
+# rolling_summary_max_chars = 6000
+# history_max_items = 50
+# history_item_max_chars = 4000
+# inject_max_chars = 4000

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 
 from feishu_claudecode_qiao.session_store import SessionStore, calculate_rollover_score, is_rollover_cooled_down, SessionMeta
+from feishu_claudecode_qiao.rule_engine import DEFAULT_RULE
 
 
 def test_save_and_load(tmp_path):
@@ -114,6 +115,22 @@ def test_calculate_rollover_score_hard_limit():
     meta.output_chars = 100000
     score = calculate_rollover_score(meta, {})
     assert score >= 100
+
+
+def test_default_rollover_is_not_triggered_at_old_35_turn_limit():
+    meta = SessionMeta(session_key="k")
+    meta.message_count = 35
+    score = calculate_rollover_score(meta, DEFAULT_RULE["context_policy"])
+    assert score < DEFAULT_RULE["context_policy"]["score_threshold"]
+
+
+def test_default_rollover_triggers_at_new_hard_limit_with_activity():
+    meta = SessionMeta(session_key="k")
+    meta.message_count = DEFAULT_RULE["context_policy"]["hard_message_limit"]
+    meta.input_chars = 50000
+    meta.output_chars = 100000
+    score = calculate_rollover_score(meta, DEFAULT_RULE["context_policy"])
+    assert score >= DEFAULT_RULE["context_policy"]["score_threshold"]
 
 
 def test_calculate_rollover_score_context_error():

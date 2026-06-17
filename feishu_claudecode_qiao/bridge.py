@@ -1502,27 +1502,14 @@ class Bridge:
                 fallback=self.config.claude_permission_mode,
             )
 
-            reply, new_session = self._call_claude(
+            reply, new_session = self._call_claude_with_recovery(
                 prompt,
                 session_id,
+                session_key,
+                effective_rule,
                 cwd=effective_workspace,
                 permission_mode=permission_mode,
             )
-            if (
-                session_key
-                and session_id
-                and self._is_missing_claude_session_reply(reply)
-            ):
-                self.bridge_logger.warning(
-                    f"Claude session missing, retrying without session: {session_id}"
-                )
-                self.session_store.update_session_id(session_key, "")
-                reply, new_session = self._call_claude(
-                    prompt,
-                    None,
-                    cwd=effective_workspace,
-                    permission_mode=permission_mode,
-                )
             if session_key and new_session:
                 self.session_store.update_session_id(session_key, new_session)
             if session_key:
@@ -1652,6 +1639,25 @@ class Bridge:
             return self._cmd_memory(session_key, cmd.args)
         elif cmd.name == "ask":
             return self._cmd_ask(chat_id, sender, sender_name, cmd.args, chat_rule)
+        elif cmd.name == "reset":
+            if session_key:
+                action = (cmd.args or "session").strip().lower()
+                if action == "all":
+                    self.session_store.clear_memory(session_key)
+                    self.session_store.clear_session_id(session_key)
+                    return "当前会话和长期记忆已重置。"
+                self.session_store.clear_session_id(session_key)
+            return "当前 Claude session 已重置，长期记忆已保留。"
+        elif cmd.name == "new":
+            if session_key:
+                self.session_store.clear_session_id(session_key)
+            return "已开启新的 Claude session，长期记忆已保留。"
+        elif cmd.name == "rollover":
+            summary = self._maybe_rollover_session(session_key, effective_rule, force=True)
+            return "已生成交接摘要并开启新的 Claude session。" if summary else "无法生成交接摘要。"
+        elif cmd.name == "compact":
+            summary = self._maybe_rollover_session(session_key, effective_rule, force=True)
+            return "已生成交接摘要并开启新的 Claude session。" if summary else "无法生成交接摘要。"
         elif cmd.name == "reset":
             if session_key:
                 self.session_store.clear_session(session_key)
@@ -2172,6 +2178,23 @@ Rules:
             or "session 不存在" in text
         )
 
+    def _is_context_limit_reply(self, reply: str) -> bool:
+        text = reply.lower()
+        return "context" in text and (
+            "too long" in text
+            or "length" in text
+            or "exceeded" in text
+            or "window" in text
+        )
+
+    def _is_transient_claude_error(self, reply: str) -> bool:
+        text = reply.lower()
+        return (
+            "api error: 500" in text
+            or "500 internal server error" in text
+            or "internal server error" in text
+        )
+
     def _build_claude_popen_args(self, args: list[str]) -> tuple[list[str] | str, bool]:
         import subprocess
         cli = args[0]
@@ -2259,6 +2282,60 @@ Rules:
                     final_text = result
 
         return final_text or "[Claude未返回内容]", new_session_id or session_id
+
+    def _call_claude_with_recovery(
+        self,
+        prompt: str,
+        session_id: str | None,
+        session_key: str | None,
+        effective_rule,
+        *,
+        cwd: str | None = None,
+        permission_mode: str | None = None,
+    ) -> tuple[str, str | None]:
+        reply, new_session = self._call_claude(
+            prompt,
+            session_id,
+            cwd=cwd,
+            permission_mode=permission_mode,
+        )
+
+        if self._is_transient_claude_error(reply):
+            self.bridge_logger.warning("Claude returned transient server error; retrying once")
+            time.sleep(3)
+            reply, new_session = self._call_claude(
+                prompt,
+                session_id,
+                cwd=cwd,
+                permission_mode=permission_mode,
+            )
+            if self._is_transient_claude_error(reply):
+                return "Claude 服务端暂时返回 500，已自动重试一次仍失败。请稍后再试。", new_session
+
+        if session_key and session_id and self._is_missing_claude_session_reply(reply):
+            self.bridge_logger.warning(
+                f"Claude session missing, retrying without session: {session_id}"
+            )
+            self.session_store.clear_session_id(session_key)
+            return self._call_claude(
+                prompt,
+                None,
+                cwd=cwd,
+                permission_mode=permission_mode,
+            )
+
+        if session_key and self._is_context_limit_reply(reply):
+            self.bridge_logger.warning("Claude context limit reached; rolling over and retrying")
+            memory_context = self._maybe_rollover_session(session_key, effective_rule, force=True)
+            retry_prompt = f"{memory_context}\n\n当前用户消息:\n{prompt}" if memory_context else prompt
+            return self._call_claude(
+                retry_prompt,
+                None,
+                cwd=cwd,
+                permission_mode=permission_mode,
+            )
+
+        return reply, new_session
 
     # ------------------------------------------------------------------
     # Feishu API
@@ -2516,13 +2593,48 @@ Rules:
             self.bridge_logger.exception(f"Download image error: {e}")
         return None
 
+    def _fetch_message_content_by_id(
+        self, message_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch full message content from Feishu API when compact events drop it."""
+        if not message_id:
+            return None
+        url = f"{self.config.feishu_domain}/open-apis/im/v1/messages/{message_id}"
+        try:
+            resp = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {self._get_token()}"},
+                timeout=30,
+            )
+            result = resp.json()
+            if result.get("code") != 0:
+                self.bridge_logger.warning(
+                    f"Fetch message by id failed: {result}"
+                )
+                return None
+            items = result.get("data", {}).get("items", []) or []
+            if not items:
+                return None
+            content_raw = items[0].get("body", {}).get("content", "")
+            if isinstance(content_raw, str):
+                return json.loads(content_raw)
+            return content_raw
+        except Exception as e:
+            self.bridge_logger.warning(f"Fetch message by id error: {e}")
+            return None
+
     def _process_audio(
         self, message_id: str, content_obj: dict[str, Any]
     ) -> str | None:
         """Download and transcribe an audio message."""
         audio_key = content_obj.get("file_key", "")
         if not audio_key:
-            return None
+            # lark-cli --compact emits [Voice: Xs] without file_key; fetch the real content.
+            full_content = self._fetch_message_content_by_id(message_id)
+            if isinstance(full_content, dict):
+                audio_key = full_content.get("file_key", "")
+            if not audio_key:
+                return None
 
         # Download audio file
         url = (

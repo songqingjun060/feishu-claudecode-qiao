@@ -857,3 +857,30 @@ def test_mentioned_recent_audio_request_fetches_group_history_when_cache_misses(
 
     assert transcribed in prompts[-1]
     assert "bridge_recent_audio_transcript" in prompts[-1]
+
+
+def test_process_audio_fetches_full_content_when_file_key_missing(tmp_path, monkeypatch):
+    """lark-cli --compact sends [Voice: Xs] without file_key; _process_audio should fetch it."""
+    bridge = make_bridge(tmp_path)
+    fetched_ids = []
+
+    def fake_fetch(message_id):
+        fetched_ids.append(message_id)
+        return {"file_key": "audio_key_from_api"}
+
+    monkeypatch.setattr(bridge, "_fetch_message_content_by_id", fake_fetch)
+
+    class FakeResponse:
+        status_code = 500
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(
+        "feishu_claudecode_qiao.bridge.requests.get",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+
+    result = bridge._process_audio("om_audio_compact", {"text": "[Voice: 9s]"})
+
+    assert fetched_ids == ["om_audio_compact"]
+    assert result is None

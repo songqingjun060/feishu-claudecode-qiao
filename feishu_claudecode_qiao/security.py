@@ -86,6 +86,9 @@ class SecurityPolicy:
         return []
 
     def _blocked_path_match(self, path: str) -> str:
+        normalized = path.replace("\\", "/")
+        if re.match(r"^[A-Za-z]:/Windows/Temp(?:/|$)", normalized, re.IGNORECASE):
+            return ""
         for pattern in self._BLOCKED_PATH_PATTERNS:
             if re.search(pattern, path, re.IGNORECASE):
                 return pattern

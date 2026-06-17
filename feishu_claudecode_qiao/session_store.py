@@ -144,6 +144,19 @@ class SessionStore:
             del self._data[session_key]
             self.save()
 
+    def clear_session_id(self, session_key: str) -> None:
+        meta = self.get(session_key)
+        meta.session_id = ""
+        meta.message_count = 0
+        meta.input_chars = 0
+        meta.output_chars = 0
+        meta.attachment_task_count = 0
+        meta.updated_at = datetime.now(timezone.utc).isoformat()
+        if not meta.created_at:
+            meta.created_at = meta.updated_at
+        self._data[session_key] = asdict(meta)
+        self.save()
+
     def clear_memory(self, session_key: str) -> None:
         meta = self.get(session_key)
         meta.summary = ""

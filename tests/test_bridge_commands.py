@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from feishu_claudecode_qiao.bridge import Bridge
 from feishu_claudecode_qiao.config import Config
 
@@ -8,6 +9,7 @@ def make_bridge(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        claude_work_dir=str(tmp_path),
     ))
 
 
@@ -58,6 +60,21 @@ def test_parse_memory_command():
     assert cmd.args == "history"
 
 
+def test_parse_rollover_command():
+    from feishu_claudecode_qiao.commands import parse_command
+    cmd = parse_command("/rollover")
+    assert cmd.is_command
+    assert cmd.name == "rollover"
+
+
+def test_parse_reset_session_command():
+    from feishu_claudecode_qiao.commands import parse_command
+    cmd = parse_command("/reset session")
+    assert cmd.is_command
+    assert cmd.name == "reset"
+    assert cmd.args == "session"
+
+
 def test_cmd_memory_show_and_clear(tmp_path):
     bridge = make_bridge(tmp_path)
     bridge.session_store.update_session_id("chat:c1", "sess_1")
@@ -79,6 +96,77 @@ def test_cmd_memory_show_and_clear(tmp_path):
     assert meta.memory["rolling_summary"] == ""
 
 
+def test_reset_session_keeps_memory(tmp_path):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sess_1")
+    bridge.session_store.archive_and_rollover(
+        "chat:c1",
+        "summary",
+        "sess_1",
+        rolling_summary="memory stays",
+    )
+    bridge.session_store.update_session_id("chat:c1", "sess_2")
+
+    reply = bridge._handle_command(
+        __import__("feishu_claudecode_qiao.commands", fromlist=["Command"]).Command("reset", "session", True),
+        resolve_rule({}),
+        "chat:c1",
+        "c1",
+        "u1",
+        "tester",
+        {},
+        "p2p",
+    )
+
+    meta = bridge.session_store.get("chat:c1")
+    assert meta.session_id == ""
+    assert meta.memory["rolling_summary"] == "memory stays"
+    assert "session" in reply.lower() or "会话" in reply
+
+
+def test_reset_all_clears_memory(tmp_path):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sess_1")
+    bridge.session_store.archive_and_rollover(
+        "chat:c1",
+        "summary",
+        "sess_1",
+        rolling_summary="memory gone",
+    )
+    bridge.session_store.update_session_id("chat:c1", "sess_2")
+
+    bridge._handle_command(Command("reset", "all", True), resolve_rule({}), "chat:c1", "c1", "u1", "tester", {}, "p2p")
+
+    meta = bridge.session_store.get("chat:c1")
+    assert meta.session_id == ""
+    assert meta.memory["rolling_summary"] == ""
+
+
+def test_rollover_command_forces_rollover(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sess_1")
+    bridge.session_store.record_turn("chat:c1", 10, 20)
+    called = []
+
+    def fake_rollover(session_key, rule, force=False):
+        called.append((session_key, force))
+        return "<chat_memory>summary</chat_memory>"
+
+    monkeypatch.setattr(bridge, "_maybe_rollover_session", fake_rollover)
+    reply = bridge._handle_command(Command("rollover", "", True), resolve_rule({}), "chat:c1", "c1", "u1", "tester", {}, "p2p")
+
+    assert called == [("chat:c1", True)]
+    assert "rollover" in reply.lower() or "翻页" in reply or "摘要" in reply
+
+
 def test_cmd_workspace_show(tmp_path):
     bridge = make_bridge(tmp_path)
     from feishu_claudecode_qiao.rule_engine import resolve_rule
@@ -97,10 +185,12 @@ def test_cmd_permission_show(tmp_path):
 
 
 def test_cmd_workspace_set_and_clear(tmp_path):
-    bridge = make_bridge(tmp_path)
     from feishu_claudecode_qiao.rule_engine import resolve_rule
-    ws = tmp_path / "ws"
-    ws.mkdir()
+    safe_root = Path(__file__).resolve().parents[1] / ".pytest_tmp" / "workspace_set"
+    safe_root.mkdir(parents=True, exist_ok=True)
+    bridge = make_bridge(safe_root)
+    ws = safe_root / "ws"
+    ws.mkdir(exist_ok=True)
     reply = bridge._cmd_workspace("c1", f"set {ws}", resolve_rule({}))
     assert "已设置" in reply
     assert str(ws) in reply
@@ -192,12 +282,14 @@ def test_cmd_workspace_set_denied_for_group_member(tmp_path):
 
 
 def test_cmd_paths_adds_multiple_directories(tmp_path):
-    bridge = make_bridge(tmp_path)
     from feishu_claudecode_qiao.rule_engine import resolve_rule
-    a = tmp_path / "a"
-    b = tmp_path / "b"
-    a.mkdir()
-    b.mkdir()
+    safe_root = Path(__file__).resolve().parents[1] / ".pytest_tmp" / "paths_multiple"
+    safe_root.mkdir(parents=True, exist_ok=True)
+    bridge = make_bridge(safe_root)
+    a = safe_root / "a"
+    b = safe_root / "b"
+    a.mkdir(exist_ok=True)
+    b.mkdir(exist_ok=True)
 
     reply = bridge._cmd_paths("c1", f"add {a}, {b}", resolve_rule({}))
 
@@ -207,10 +299,12 @@ def test_cmd_paths_adds_multiple_directories(tmp_path):
 
 
 def test_cmd_paths_ignores_trailing_bot_mention(tmp_path):
-    bridge = make_bridge(tmp_path)
     from feishu_claudecode_qiao.rule_engine import resolve_rule
-    target = tmp_path / "storage"
-    target.mkdir()
+    safe_root = Path(__file__).resolve().parents[1] / ".pytest_tmp" / "paths_mention"
+    safe_root.mkdir(parents=True, exist_ok=True)
+    bridge = make_bridge(safe_root)
+    target = safe_root / "storage"
+    target.mkdir(exist_ok=True)
 
     reply = bridge._cmd_paths("c1", f"add {target} @??", resolve_rule({}))
 
@@ -219,10 +313,12 @@ def test_cmd_paths_ignores_trailing_bot_mention(tmp_path):
 
 
 def test_cmd_workspace_ignores_trailing_bot_mention(tmp_path):
-    bridge = make_bridge(tmp_path)
     from feishu_claudecode_qiao.rule_engine import resolve_rule
-    target = tmp_path / "workspace"
-    target.mkdir()
+    safe_root = Path(__file__).resolve().parents[1] / ".pytest_tmp" / "workspace_mention"
+    safe_root.mkdir(parents=True, exist_ok=True)
+    bridge = make_bridge(safe_root)
+    target = safe_root / "workspace"
+    target.mkdir(exist_ok=True)
 
     reply = bridge._cmd_workspace("c1", f"set {target} @??", resolve_rule({}))
 
