@@ -101,6 +101,7 @@ permission_mode = "safe"
 
 [whisper]
 model = "base"
+load_policy = "lazy"  # preload / lazy / per_call
 
 [bridge]
 data_dir = "./data"
@@ -123,6 +124,14 @@ blocked_keywords = []
 ```
 
 也可以使用 `FEISHUCLAUDECODE_` 前缀的环境变量覆盖配置。
+
+语音模型加载策略由 `[whisper].load_policy` 控制：
+
+| 值 | 行为 | 适用场景 |
+|---|---|---|
+| `preload` | 桥启动时加载 Whisper，并在进程内常驻 | 希望第一条语音也快，接受启动变慢和提前占用内存 |
+| `lazy` | 第一次语音时加载，之后常驻复用 | 默认推荐，启动快，后续语音快 |
+| `per_call` | 每条语音临时加载，用完释放 | 语音很少、希望平时不常驻占内存 |
 
 会话翻页和长期记忆的默认策略来自会话规则 `context_policy` 和 `memory_policy`。当前全局 `config.toml` 只读取固定的 `[feishu]`、`[claude]`、`[whisper]`、`[bridge]`、`[security]` 配置表；如需按群或成员调整策略，请通过会话规则文件修改，避免在全局配置里加入加载器尚未消费的表。
 

@@ -12,6 +12,7 @@ permission_mode = "safe"
 
 [whisper]
 model = "base"
+load_policy = "lazy"  # preload / lazy / per_call
 
 [bridge]
 data_dir = "./data"

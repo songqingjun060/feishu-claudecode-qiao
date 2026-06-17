@@ -103,6 +103,20 @@ def test_call_claude_uses_result_when_stream_is_empty(tmp_path, monkeypatch):
 
 def test_process_audio_reuses_whisper_model_and_forces_chinese(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
+    calls = install_fake_audio_stack(bridge, monkeypatch)
+
+    first = bridge._process_audio("om_audio_1", {"file_key": "file_1"})
+    second = bridge._process_audio("om_audio_2", {"file_key": "file_2"})
+
+    assert first == "简体中文"
+    assert second == "简体中文"
+    assert [call[0] for call in calls].count("init") == 1
+    transcribe_calls = [call for call in calls if call[0] == "transcribe"]
+    assert transcribe_calls
+    assert all(call[1]["language"] == "zh" for call in transcribe_calls)
+
+
+def install_fake_audio_stack(bridge, monkeypatch):
     bridge._token = "tenant_token"
     bridge._token_expires = 9999999999
 
@@ -128,13 +142,35 @@ def test_process_audio_reuses_whisper_model_and_forces_chinese(tmp_path, monkeyp
 
     fake_module = types.SimpleNamespace(WhisperModel=FakeModel)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    return calls
+
+
+def test_whisper_preload_policy_loads_model_on_bridge_start(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeModel:
+        def __init__(self, name, device, compute_type):
+            calls.append(("init", name, device, compute_type))
+
+        def transcribe(self, path, **kwargs):
+            return [types.SimpleNamespace(text="简体中文")], object()
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeModel))
+
+    bridge = make_bridge(tmp_path, whisper_load_policy="preload")
+
+    assert bridge._whisper_model is not None
+    assert [call[0] for call in calls] == ["init"]
+
+
+def test_whisper_per_call_policy_does_not_cache_model(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path, whisper_load_policy="per_call")
+    calls = install_fake_audio_stack(bridge, monkeypatch)
 
     first = bridge._process_audio("om_audio_1", {"file_key": "file_1"})
     second = bridge._process_audio("om_audio_2", {"file_key": "file_2"})
 
     assert first == "简体中文"
     assert second == "简体中文"
-    assert [call[0] for call in calls].count("init") == 1
-    transcribe_calls = [call for call in calls if call[0] == "transcribe"]
-    assert transcribe_calls
-    assert all(call[1]["language"] == "zh" for call in transcribe_calls)
+    assert [call[0] for call in calls].count("init") == 2
+    assert bridge._whisper_model is None

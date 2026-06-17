@@ -159,6 +159,9 @@ class Bridge:
         self._recent_files_by_chat: dict[str, dict[str, Any]] = {}
         self._whisper_model: Any | None = None
         self._whisper_model_name: str | None = None
+        self._whisper_load_policy = (config.whisper_load_policy or "lazy").lower()
+        if self._whisper_load_policy == "preload":
+            self._load_whisper_model()
         drive_roots = [Path(f"{chr(letter)}:/") for letter in range(ord("A"), ord("Z") + 1)]
         self._local_file_search_dirs = [
             Path.home() / "Desktop",
@@ -2475,7 +2478,8 @@ Rules:
         return final_text or "[Claude未返回内容]", new_session_id or session_id
 
     def _load_whisper_model(self) -> Any | None:
-        if self._whisper_model is not None and self._whisper_model_name == self.config.whisper_model:
+        use_cache = self._whisper_load_policy in {"lazy", "preload"}
+        if use_cache and self._whisper_model is not None and self._whisper_model_name == self.config.whisper_model:
             return self._whisper_model
         try:
             from faster_whisper import WhisperModel
@@ -2483,16 +2487,18 @@ Rules:
             self.bridge_logger.info(
                 f"Loading Whisper model '{self.config.whisper_model}'..."
             )
-            self._whisper_model = WhisperModel(
+            model = WhisperModel(
                 self.config.whisper_model,
                 device="cpu",
                 compute_type="int8",
             )
-            self._whisper_model_name = self.config.whisper_model
+            if use_cache:
+                self._whisper_model = model
+                self._whisper_model_name = self.config.whisper_model
             self.bridge_logger.info(
                 f"Whisper model '{self.config.whisper_model}' loaded"
             )
-            return self._whisper_model
+            return model
         except ImportError:
             return None
 

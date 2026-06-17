@@ -13,6 +13,7 @@ def test_config_defaults():
     assert config.feishu_event_backend == "start_ws"
     assert config.bridge_console_message_log is True
     assert config.bridge_console_claude_stream is True
+    assert config.whisper_load_policy == "lazy"
 
 
 def test_config_from_env(monkeypatch):
@@ -21,12 +22,14 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setenv("FEISHUCLAUDECODE_FEISHU_EVENT_BACKEND", "lark_oapi_ws")
     monkeypatch.setenv("FEISHUCLAUDECODE_BRIDGE_CONSOLE_MESSAGE_LOG", "false")
     monkeypatch.setenv("FEISHUCLAUDECODE_BRIDGE_CONSOLE_CLAUDE_STREAM", "false")
+    monkeypatch.setenv("FEISHUCLAUDECODE_WHISPER_LOAD_POLICY", "per_call")
     config = load_config()
     assert config.feishu_app_id == "from_env"
     assert config.feishu_gateway_backend == "lark_oapi"
     assert config.feishu_event_backend == "lark_oapi_ws"
     assert config.bridge_console_message_log is False
     assert config.bridge_console_claude_stream is False
+    assert config.whisper_load_policy == "per_call"
 
 
 def test_config_reads_explicit_backend_selection(tmp_path):

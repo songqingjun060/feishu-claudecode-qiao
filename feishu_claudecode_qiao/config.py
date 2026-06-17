@@ -35,6 +35,7 @@ class Config:
 
     # Whisper
     whisper_model: str = "base"
+    whisper_load_policy: str = "lazy"
 
     # Bridge
     bridge_data_dir: str = "./data"
@@ -82,6 +83,7 @@ def _env_override(cfg: Config) -> Config:
         claude_work_dir=_get("FEISHUCLAUDECODE_CLAUDE_WORK_DIR", cfg.claude_work_dir),
         claude_permission_mode=_get("FEISHUCLAUDECODE_CLAUDE_PERMISSION_MODE", cfg.claude_permission_mode),
         whisper_model=_get("FEISHUCLAUDECODE_WHISPER_MODEL", cfg.whisper_model),
+        whisper_load_policy=_get("FEISHUCLAUDECODE_WHISPER_LOAD_POLICY", cfg.whisper_load_policy),
         bridge_data_dir=_get("FEISHUCLAUDECODE_BRIDGE_DATA_DIR", cfg.bridge_data_dir),
         bridge_log_level=_get("FEISHUCLAUDECODE_BRIDGE_LOG_LEVEL", cfg.bridge_log_level),
         bridge_max_upload_mb=_get("FEISHUCLAUDECODE_BRIDGE_MAX_UPLOAD_MB", cfg.bridge_max_upload_mb),
@@ -125,6 +127,7 @@ def load_config(path: str | Path | None = None) -> Config:
             claude_work_dir=data.get("claude", {}).get("work_dir", "."),
             claude_permission_mode=data.get("claude", {}).get("permission_mode", "bypassPermissions"),
             whisper_model=data.get("whisper", {}).get("model", "base"),
+            whisper_load_policy=data.get("whisper", {}).get("load_policy", "lazy"),
             bridge_data_dir=data.get("bridge", {}).get("data_dir", "./data"),
             bridge_log_level=data.get("bridge", {}).get("log_level", "INFO"),
             bridge_max_upload_mb=data.get("bridge", {}).get("max_upload_mb", 20),

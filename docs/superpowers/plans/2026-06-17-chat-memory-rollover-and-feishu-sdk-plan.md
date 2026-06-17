@@ -323,7 +323,7 @@ console_message_log = true
 console_claude_stream = true
 ```
 
-默认前台窗口镜像消息日志，并流式打印 Claude 输出。语音转写模型第一次使用时懒加载，后续复用，并指定中文识别。官方 SDK 实验后端即使只是占位，也要在启用失败时写出清楚的前台 warning。
+默认前台窗口镜像消息日志，并流式打印 Claude 输出。语音转写模型支持 `preload`、`lazy`、`per_call` 三档加载策略，默认 `lazy`，并指定中文识别。官方 SDK 实验后端即使只是占位，也要在启用失败时写出清楚的前台 warning。
 
 - [ ] **步骤 4：运行全量测试**
 

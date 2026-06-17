@@ -58,6 +58,10 @@ command = "claude"
 work_dir = "D:/your/workspace"
 permission_mode = "safe"
 
+[whisper]
+model = "base"
+load_policy = "lazy"
+
 [bridge]
 data_dir = "./data"
 require_mention_in_group = true
@@ -75,6 +79,12 @@ allowed_paths = ["D:/your/workspace"]
 同一个群里有多个机器人时，必须把 `bot_display_name` 设置成当前机器人的飞书显示名称。群消息只有在明确 @ 当前机器人，或 mention 展示名与 `bot_display_name` 完全匹配时才会处理。
 
 个人会话使用 `personal_permission_profile`。群规则只对当前群生效，并由机器人所有者控制：如果 `bot_admins` 为空，只有 `bot_owner_id` 可以修改群规则；如果设置了 `bot_admins`，则只有列表里的用户可以修改群规则。
+
+语音模型加载策略可以按使用方式选择：
+
+- `preload`：桥启动时加载并常驻，第一条语音更快，但启动更慢。
+- `lazy`：第一次语音时加载并常驻，默认推荐。
+- `per_call`：每条语音临时加载，不常驻占用内存，但每条语音都会慢。
 
 可信维护群可以在桥运行过一次后创建 `data/rules/<chat_id>.json`：
 
