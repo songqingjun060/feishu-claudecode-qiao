@@ -10,6 +10,7 @@ Design principles:
 from __future__ import annotations
 
 import argparse
+import copy
 import html
 import json
 import mimetypes
@@ -172,7 +173,12 @@ class Bridge:
         self.media_batcher = MediaBatcher(
             window_seconds=config.bridge_media_batch_window_seconds,
         )
-        self.event_dispatcher = ChatEventDispatcher(self._process_event)
+        self.event_dispatcher = ChatEventDispatcher(
+            self._process_event,
+            coalesce=self._coalesce_chat_events,
+            before_process=self._preprocess_coalesced_event,
+            coalesce_window_seconds=config.bridge_message_coalesce_window_seconds,
+        )
         self.recent_context = RecentContext()
         self.claude_runner = self._make_claude_runner()
         self.bridge_logger.info(f"Claude runner: {config.claude_runner or 'oneshot'}")
@@ -333,6 +339,124 @@ class Bridge:
         if not file_key:
             return None
         return {"file_key": file_key, "file_name": file_name}
+
+    def _event_message(self, event: dict[str, Any]) -> dict[str, Any]:
+        return event.get("event", {}).get("message", {})
+
+    def _event_sender(self, event: dict[str, Any]) -> str:
+        return self._sender_id(event.get("event", {}))
+
+    def _event_text(self, event: dict[str, Any]) -> str:
+        message = self._event_message(event)
+        content_raw = message.get("content", "")
+        msg_type = message.get("message_type", "text")
+        try:
+            content_obj = (
+                json.loads(content_raw)
+                if isinstance(content_raw, str)
+                else content_raw
+            )
+        except Exception:
+            return content_raw if isinstance(content_raw, str) else ""
+        if msg_type == "post":
+            return self._extract_post_text(content_obj)
+        if isinstance(content_obj, dict):
+            return str(content_obj.get("text", ""))
+        return ""
+
+    def _coalesce_chat_events(self, events: list[dict[str, Any]]) -> dict[str, Any] | list[dict[str, Any]]:
+        """Merge short same-chat bursts into one event before Claude sees them."""
+        if len(events) <= 1:
+            return events[0]
+
+        last = events[-1]
+        last_message = self._event_message(last)
+        if last_message.get("message_type", "text") != "text":
+            return events
+
+        sender = self._event_sender(last)
+        mergeable: list[dict[str, Any]] = []
+        media_context_events: list[dict[str, Any]] = []
+        for event in events:
+            message = self._event_message(event)
+            if self._event_sender(event) != sender:
+                return events
+            msg_type = message.get("message_type", "text")
+            if msg_type == "text":
+                mergeable.append(event)
+            elif msg_type in ("image", "post", "file", "audio"):
+                media_context_events.append(event)
+            else:
+                return events
+
+        texts = [self._event_text(event).strip() for event in mergeable]
+        texts = [text for text in texts if text]
+        if len(texts) <= 1 and not media_context_events:
+            return events[-1]
+
+        merged = copy.deepcopy(last)
+        message = self._event_message(merged)
+        if len(texts) > 1:
+            message["content"] = json.dumps(
+                {
+                    "text": "\n".join(
+                        f"连续消息 {idx + 1}: {text}"
+                        for idx, text in enumerate(texts)
+                    )
+                },
+                ensure_ascii=False,
+            )
+        merged["_bridge_coalesced_context_events"] = media_context_events
+        self.audit.write(
+            "message_coalesced",
+            chat_id=message.get("chat_id", ""),
+            message_id=message.get("message_id", ""),
+            count=len(events),
+            media_count=len(media_context_events),
+        )
+        return merged
+
+    def _preprocess_coalesced_event(self, event: dict[str, Any]) -> None:
+        for context_event in event.pop("_bridge_coalesced_context_events", []) or []:
+            self._cache_context_event(context_event)
+
+    def _cache_context_event(self, event: dict[str, Any]) -> None:
+        event_data = event.get("event", {})
+        message = event_data.get("message", {})
+        msg_id = message.get("message_id", "")
+        chat_type = message.get("chat_type", "")
+        chat_id = message.get("chat_id", "")
+        msg_type = message.get("message_type", "text")
+        content_raw = message.get("content", "")
+        try:
+            content_obj = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
+        except Exception:
+            content_obj = {}
+        sender = self._sender_id(event_data)
+        if msg_type == "audio" and isinstance(content_obj, dict):
+            self._cache_recent_audio(chat_id, msg_id, content_obj, sender)
+        elif msg_type == "file" and isinstance(content_obj, dict):
+            file_path = self._cache_recent_file_message(chat_id, msg_id, content_obj, sender)
+            if file_path:
+                self._remember_media_item(
+                    chat_id,
+                    chat_type,
+                    sender,
+                    kind="file",
+                    message_id=msg_id,
+                    path=file_path,
+                    file_name=str(content_obj.get("file_name", "")),
+                )
+        elif msg_type in ("image", "post"):
+            for image_path in self._cache_recent_image_message(chat_id, msg_id, content_obj, content_raw):
+                self._remember_media_item(
+                    chat_id,
+                    chat_type,
+                    sender,
+                    kind="image",
+                    message_id=msg_id,
+                    path=image_path,
+                )
 
     def _cache_recent_audio(
         self,

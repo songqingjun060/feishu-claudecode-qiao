@@ -71,3 +71,29 @@ def test_different_chats_can_process_while_one_chat_is_blocked():
         assert dispatcher.wait_idle(timeout=2)
     finally:
         dispatcher.stop(timeout=2)
+
+
+def test_same_chat_events_can_be_coalesced_within_window():
+    processed = []
+
+    def coalesce(events):
+        merged = make_event("oc_1", "+".join(
+            event["event"]["message"]["message_id"] for event in events
+        ))
+        merged["merged_count"] = len(events)
+        return merged
+
+    dispatcher = ChatEventDispatcher(
+        lambda event: processed.append(event),
+        coalesce=coalesce,
+        coalesce_window_seconds=0.05,
+    )
+    try:
+        dispatcher.dispatch(make_event("oc_1", "om_1"))
+        dispatcher.dispatch(make_event("oc_1", "om_2"))
+
+        assert dispatcher.wait_idle(timeout=2)
+        assert [event["event"]["message"]["message_id"] for event in processed] == ["om_1+om_2"]
+        assert processed[0]["merged_count"] == 2
+    finally:
+        dispatcher.stop(timeout=2)

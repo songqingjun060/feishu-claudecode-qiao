@@ -35,6 +35,9 @@ console_message_log = true
 console_claude_stream = true
 queue_notice_after_seconds = 8
 media_batch_window_seconds = 10
+# 同一聊天窗口内的连续文本消息会先等这个窗口再合并成一次 Claude 调用。
+# 设为 0 可关闭合并；图片/文件/语音不会被吞并，会继续按顺序处理并进入上下文。
+message_coalesce_window_seconds = 10
 progress_cards = false
 fast_tasks_enabled = true
 # 如果 bot_admins 为空，只有 bot_owner_id 能修改群规则。
