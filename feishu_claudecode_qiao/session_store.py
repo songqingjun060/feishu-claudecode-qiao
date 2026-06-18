@@ -26,6 +26,7 @@ class SessionMeta:
     memory: dict = None
     memory_history: list = None
     status: str = "active"
+    force_rollover_next: bool = False
 
     def __post_init__(self) -> None:
         if self.memory is None:
@@ -167,6 +168,13 @@ class SessionStore:
             "version": 0,
         }
         meta.memory_history = []
+        self._data[session_key] = asdict(meta)
+        self.save()
+
+    def set_force_rollover_next(self, session_key: str, value: bool = True) -> None:
+        meta = self.get(session_key)
+        meta.force_rollover_next = value
+        meta.updated_at = datetime.now(timezone.utc).isoformat()
         self._data[session_key] = asdict(meta)
         self.save()
 

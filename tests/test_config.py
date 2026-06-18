@@ -47,3 +47,34 @@ event_backend = "lark_oapi_ws"
 
     assert config.feishu_gateway_backend == "lark_oapi"
     assert config.feishu_event_backend == "lark_oapi_ws"
+
+
+def test_load_agent_bridge_upgrade_options(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[claude]
+runner = "oneshot"
+worker_idle_ttl_seconds = 900
+max_workers = 3
+persistent_enabled_chats = ["oc_1", "oc_2"]
+
+[bridge]
+queue_notice_after_seconds = 6
+media_batch_window_seconds = 4
+progress_cards = true
+fast_tasks_enabled = false
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.claude_runner == "oneshot"
+    assert config.claude_worker_idle_ttl_seconds == 900
+    assert config.claude_max_workers == 3
+    assert config.claude_persistent_enabled_chats == ["oc_1", "oc_2"]
+    assert config.bridge_queue_notice_after_seconds == 6
+    assert config.bridge_media_batch_window_seconds == 4
+    assert config.bridge_progress_cards is True
+    assert config.bridge_fast_tasks_enabled is False

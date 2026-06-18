@@ -184,6 +184,55 @@ def test_cmd_permission_show(tmp_path):
     assert "开发" in reply
 
 
+def test_cmd_status_queue_and_stop(tmp_path):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+    bridge.scheduler.enqueue(
+        chat_id="c1",
+        message_id="om_1",
+        sender_id="u1",
+        content="长任务",
+        now=100.0,
+    )
+    bridge.scheduler.enqueue(
+        chat_id="c1",
+        message_id="om_2",
+        sender_id="u1",
+        content="排队任务",
+        now=101.0,
+    )
+
+    status = bridge._handle_command(Command("status", "", True), resolve_rule({}), "chat:c1", "c1", "u1", "tester", {}, "p2p")
+    queue = bridge._handle_command(Command("queue", "", True), resolve_rule({}), "chat:c1", "c1", "u1", "tester", {}, "p2p")
+    stop = bridge._handle_command(Command("stop", "", True), resolve_rule({}), "chat:c1", "c1", "u1", "tester", {}, "p2p")
+
+    assert "运行中" in status
+    assert "排队" in queue
+    assert "1" in queue
+    assert "已请求停止" in stop
+
+
+def test_cmd_ps_lists_active_runs(tmp_path):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+    bridge.scheduler.enqueue(
+        chat_id="c1",
+        message_id="om_1",
+        sender_id="u1",
+        content="长任务",
+        now=100.0,
+    )
+
+    reply = bridge._handle_command(Command("ps", "", True), resolve_rule({}), "chat:c1", "c1", "u1", "tester", {}, "p2p")
+
+    assert "c1" in reply
+    assert "running" in reply
+
+
 def test_cmd_workspace_set_and_clear(tmp_path):
     from feishu_claudecode_qiao.rule_engine import resolve_rule
     safe_root = Path(__file__).resolve().parents[1] / ".pytest_tmp" / "workspace_set"

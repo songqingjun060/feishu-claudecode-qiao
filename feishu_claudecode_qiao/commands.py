@@ -23,6 +23,10 @@ SUPPORTED_COMMANDS = {
     "permission",
     "memory",
     "ask",
+    "status",
+    "queue",
+    "stop",
+    "ps",
 }
 
 

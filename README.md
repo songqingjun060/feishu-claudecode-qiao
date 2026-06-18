@@ -98,6 +98,10 @@ event_backend = "start_ws"
 command = "claude"
 work_dir = "."
 permission_mode = "safe"
+runner = "oneshot"
+worker_idle_ttl_seconds = 900
+max_workers = 3
+persistent_enabled_chats = []
 
 [whisper]
 model = "base"
@@ -114,6 +118,10 @@ ws_watchdog_interval_seconds = 30
 ws_max_restart_failures = 3
 console_message_log = true
 console_claude_stream = true
+queue_notice_after_seconds = 8
+media_batch_window_seconds = 10
+progress_cards = false
+fast_tasks_enabled = true
 personal_permission_profile = "admin"
 bot_owner_id = ""
 bot_admins = []
@@ -124,6 +132,23 @@ blocked_keywords = []
 ```
 
 也可以使用 `FEISHUCLAUDECODE_` 前缀的环境变量覆盖配置。
+
+Claude 调用入口由 `[claude].runner` 控制：
+
+| 值 | 行为 | 状态 |
+|---|---|---|
+| `oneshot` | 每条消息调用一次 `claude --print --resume`，处理完退出 | 当前默认和稳定模式 |
+| `persistent` | 每个会话维护常驻 Claude worker | 预留实验模式 |
+| `tmux` | 通过 tmux/终端会话复用 Claude 运行态 | 预留实验模式 |
+
+消息队列和媒体批处理的基础配置：
+
+| 配置 | 默认值 | 说明 |
+|---|---:|---|
+| `bridge.queue_notice_after_seconds` | `8` | 排队超过该秒数才提示一次，避免无限回复“忙/排队中” |
+| `bridge.media_batch_window_seconds` | `10` | 连续图片、文件和补充说明的归并窗口 |
+| `bridge.progress_cards` | `false` | 是否启用飞书进度卡片；未启用时继续使用文本和日志 |
+| `bridge.fast_tasks_enabled` | `true` | 是否启用固定业务快速路径；命中 BI 物流码等明确任务时先由桥直接调用本地工具，失败再交给 Claude |
 
 语音模型加载策略由 `[whisper].load_policy` 控制：
 
@@ -235,6 +260,8 @@ default -> chat -> member -> temporary
 
 连续发送的裸图片会先进入当前对话框的近期文件上下文，不会每张图片都单独调用 Claude 或单独回复。随后发送明确任务文本，例如“读取刚才图片进行物流码查询”，桥会把最近缓存的多张图片路径一起注入给 Claude Code 处理。带文字的富文本图片消息会在同一次请求中把全部图片路径交给 Claude Code。
 
+桥会为同一聊天、同一发送人在短时间内连续发送的图片或文件生成媒体批次上下文。个人会话默认可合并；群聊必须是同一发送人并且后续消息明确 @ 当前机器人。不同发送人的附件不会自动合并，避免把别人的文件错当成你的任务上下文。
+
 具体内容解析优先交给 Claude Code 和本机工具：
 
 - PDF：Claude Code 可使用 `pypdf`、`pdfplumber` 等 Python 工具。
@@ -245,6 +272,18 @@ default -> chat -> member -> temporary
 - 视频：可使用 `ffprobe`、`ffmpeg` 提取元数据、关键帧、缩略图或音频。
 
 桥本身不会把这些能力都内置成重型解析器，避免和 Claude Code 的工具能力重复。
+
+## 固定业务快速路径
+
+开启 `bridge.fast_tasks_enabled = true` 后，桥会先识别少量确定性强的业务任务。当前已接入 BI 物流码查询：
+
+- 文本明确包含“BI/物流码/查询”等意图。
+- 能提取到来源单号、WMS 配货单号或物流码。
+- 直接调用本机 `C:\Users\tanks\BI-wuliumachaxun` 下的查询工具。
+- 查询结果包含 Excel 时，桥会直接上传到当前飞书会话。
+- 如果工具失败、输入不明确或置信度不足，会继续走 Claude Code，不会硬拦截。
+
+快速路径只处理固定业务任务，不改变图片、PDF、表格、压缩包等通用文件由 Claude Code 和本机工具读取的主方案。
 
 ## 启动
 
@@ -356,3 +395,37 @@ event_backend = "start_ws"    # 当前 lark-cli/start_ws.py 事件订阅后端
 ## 安全说明
 
 参见 [SECURITY.md](SECURITY.md)。不要提交真实飞书密钥、`config.toml`、`config.realtest.toml`、运行数据或日志。
+## Claude 常驻模式
+
+默认模式仍然是 `oneshot`：每条消息调用一次 `claude --print`，处理完退出，稳定性最高。
+
+如果希望降低个人会话或高频群聊的冷启动耗时，可以启用 `persistent`：
+
+```toml
+[claude]
+runner = "persistent"
+worker_idle_ttl_seconds = 900
+max_workers = 3
+persistent_enabled_chats = []
+```
+
+`persistent` 使用可选依赖 `claude-agent-sdk` 为每个对话保留一个 Claude worker。缺少 SDK、worker 崩溃或常驻调用失败时，桥会自动回退到 `oneshot`，不会因为常驻模式不可用导致消息完全无响应。
+
+安装可选依赖：
+
+```powershell
+python -m pip install -e ".[persistent]"
+```
+
+`persistent_enabled_chats` 留空表示所有对话都可尝试常驻；如果只想先给个人对话或某几个群启用，可以填写对应的 `chat_id` 或 `session_key`。常驻模式能减少 CLI 冷启动和恢复 session 的开销，但如果某个 Claude 会话本身已经积累了很大的上下文，仍然需要配合会话翻页、长期记忆压缩和快速任务直通来控制 token。
+
+## 上下文调度和轻量会话
+
+桥会在每条消息进入 Claude 前判断会话策略：
+
+- `work`：文件、图片、表格、BI、路径、代码和复杂任务，继续使用当前工作 session。
+- `light`：当当前工作 session 已经很重，而用户只发短文本聊天或测速时，不再 resume 旧 session，避免简单消息被大上下文拖慢。
+- `fresh`：明确 `/new` 或规则要求新会话时，不带旧 session，但仍可注入桥内长期记忆。
+- `stateless`：完全不记录本轮。
+
+默认 `auto` 会自动判断。慢响应会被记录到 audit，并标记当前 chat 下一轮优先整理/翻页。相关审计字段包括 `context_decision`、`strategy`、`prompt_chars`、`memory_context_chars`、`resumed` 和 `claude_ms`。

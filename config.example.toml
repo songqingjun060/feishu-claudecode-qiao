@@ -9,6 +9,13 @@ event_backend = "start_ws"
 command = "claude"
 work_dir = "."
 permission_mode = "safe"
+# oneshot：每条消息调用一次 Claude CLI，最稳定。
+# persistent：使用 claude-agent-sdk 为对话保留常驻 Claude worker，缺少 SDK 或 worker 出错时自动回退 oneshot。
+runner = "oneshot"
+worker_idle_ttl_seconds = 900
+max_workers = 3
+# 留空表示所有对话都可使用 persistent；填写 chat_id 或 session_key 表示只对指定对话启用。
+persistent_enabled_chats = []
 
 [whisper]
 model = "base"
@@ -26,7 +33,11 @@ ws_watchdog_interval_seconds = 30
 ws_max_restart_failures = 3
 console_message_log = true
 console_claude_stream = true
-# If bot_admins is empty, bot_owner_id is the only user allowed to change group rules.
+queue_notice_after_seconds = 8
+media_batch_window_seconds = 10
+progress_cards = false
+fast_tasks_enabled = true
+# 如果 bot_admins 为空，只有 bot_owner_id 能修改群规则。
 bot_owner_id = ""
 bot_admins = []
 
@@ -55,3 +66,7 @@ blocked_keywords = []
 # history_max_items = 50
 # history_item_max_chars = 4000
 # inject_max_chars = 4000
+#
+# session_strategy 示例：
+# mode = "auto"  # auto / light / work / fresh / stateless
+# light_text_max_chars = 120

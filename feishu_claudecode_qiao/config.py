@@ -32,6 +32,10 @@ class Config:
     claude_command: str = "claude"
     claude_work_dir: str = "."
     claude_permission_mode: str = "bypassPermissions"
+    claude_runner: str = "oneshot"
+    claude_worker_idle_ttl_seconds: int = 900
+    claude_max_workers: int = 3
+    claude_persistent_enabled_chats: list[str] = field(default_factory=list)
 
     # Whisper
     whisper_model: str = "base"
@@ -51,6 +55,10 @@ class Config:
     bridge_ws_max_restart_failures: int = 3
     bridge_console_message_log: bool = True
     bridge_console_claude_stream: bool = True
+    bridge_queue_notice_after_seconds: int = 8
+    bridge_media_batch_window_seconds: int = 10
+    bridge_progress_cards: bool = False
+    bridge_fast_tasks_enabled: bool = True
 
     # Security
     security_allowed_paths: list[str] = field(default_factory=list)
@@ -82,6 +90,10 @@ def _env_override(cfg: Config) -> Config:
         claude_command=_get("FEISHUCLAUDECODE_CLAUDE_COMMAND", cfg.claude_command),
         claude_work_dir=_get("FEISHUCLAUDECODE_CLAUDE_WORK_DIR", cfg.claude_work_dir),
         claude_permission_mode=_get("FEISHUCLAUDECODE_CLAUDE_PERMISSION_MODE", cfg.claude_permission_mode),
+        claude_runner=_get("FEISHUCLAUDECODE_CLAUDE_RUNNER", cfg.claude_runner),
+        claude_worker_idle_ttl_seconds=_get("FEISHUCLAUDECODE_CLAUDE_WORKER_IDLE_TTL_SECONDS", cfg.claude_worker_idle_ttl_seconds),
+        claude_max_workers=_get("FEISHUCLAUDECODE_CLAUDE_MAX_WORKERS", cfg.claude_max_workers),
+        claude_persistent_enabled_chats=_get("FEISHUCLAUDECODE_CLAUDE_PERSISTENT_ENABLED_CHATS", cfg.claude_persistent_enabled_chats),
         whisper_model=_get("FEISHUCLAUDECODE_WHISPER_MODEL", cfg.whisper_model),
         whisper_load_policy=_get("FEISHUCLAUDECODE_WHISPER_LOAD_POLICY", cfg.whisper_load_policy),
         bridge_data_dir=_get("FEISHUCLAUDECODE_BRIDGE_DATA_DIR", cfg.bridge_data_dir),
@@ -97,6 +109,10 @@ def _env_override(cfg: Config) -> Config:
         bridge_ws_max_restart_failures=_get("FEISHUCLAUDECODE_BRIDGE_WS_MAX_RESTART_FAILURES", cfg.bridge_ws_max_restart_failures),
         bridge_console_message_log=_get("FEISHUCLAUDECODE_BRIDGE_CONSOLE_MESSAGE_LOG", cfg.bridge_console_message_log),
         bridge_console_claude_stream=_get("FEISHUCLAUDECODE_BRIDGE_CONSOLE_CLAUDE_STREAM", cfg.bridge_console_claude_stream),
+        bridge_queue_notice_after_seconds=_get("FEISHUCLAUDECODE_BRIDGE_QUEUE_NOTICE_AFTER_SECONDS", cfg.bridge_queue_notice_after_seconds),
+        bridge_media_batch_window_seconds=_get("FEISHUCLAUDECODE_BRIDGE_MEDIA_BATCH_WINDOW_SECONDS", cfg.bridge_media_batch_window_seconds),
+        bridge_progress_cards=_get("FEISHUCLAUDECODE_BRIDGE_PROGRESS_CARDS", cfg.bridge_progress_cards),
+        bridge_fast_tasks_enabled=_get("FEISHUCLAUDECODE_BRIDGE_FAST_TASKS_ENABLED", cfg.bridge_fast_tasks_enabled),
         security_allowed_paths=_get("FEISHUCLAUDECODE_SECURITY_ALLOWED_PATHS", cfg.security_allowed_paths),
         security_blocked_keywords=_get("FEISHUCLAUDECODE_SECURITY_BLOCKED_KEYWORDS", cfg.security_blocked_keywords),
     )
@@ -126,6 +142,10 @@ def load_config(path: str | Path | None = None) -> Config:
             claude_command=data.get("claude", {}).get("command", "claude"),
             claude_work_dir=data.get("claude", {}).get("work_dir", "."),
             claude_permission_mode=data.get("claude", {}).get("permission_mode", "bypassPermissions"),
+            claude_runner=data.get("claude", {}).get("runner", "oneshot"),
+            claude_worker_idle_ttl_seconds=data.get("claude", {}).get("worker_idle_ttl_seconds", 900),
+            claude_max_workers=data.get("claude", {}).get("max_workers", 3),
+            claude_persistent_enabled_chats=data.get("claude", {}).get("persistent_enabled_chats", []),
             whisper_model=data.get("whisper", {}).get("model", "base"),
             whisper_load_policy=data.get("whisper", {}).get("load_policy", "lazy"),
             bridge_data_dir=data.get("bridge", {}).get("data_dir", "./data"),
@@ -141,6 +161,10 @@ def load_config(path: str | Path | None = None) -> Config:
             bridge_ws_max_restart_failures=data.get("bridge", {}).get("ws_max_restart_failures", 3),
             bridge_console_message_log=data.get("bridge", {}).get("console_message_log", True),
             bridge_console_claude_stream=data.get("bridge", {}).get("console_claude_stream", True),
+            bridge_queue_notice_after_seconds=data.get("bridge", {}).get("queue_notice_after_seconds", 8),
+            bridge_media_batch_window_seconds=data.get("bridge", {}).get("media_batch_window_seconds", 10),
+            bridge_progress_cards=data.get("bridge", {}).get("progress_cards", False),
+            bridge_fast_tasks_enabled=data.get("bridge", {}).get("fast_tasks_enabled", True),
             security_allowed_paths=data.get("security", {}).get("allowed_paths", []),
             security_blocked_keywords=data.get("security", {}).get("blocked_keywords", []),
         )

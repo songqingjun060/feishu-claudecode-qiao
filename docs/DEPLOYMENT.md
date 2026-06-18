@@ -191,3 +191,29 @@ python -m feishu_claudecode_qiao --config config.toml
 ```
 
 通常可以保留 `data/` 里的运行数据，但不要把真实配置、日志、聊天内容或密钥提交到 Git。
+## Claude 常驻模式部署
+
+默认部署不需要安装额外依赖，`[claude].runner = "oneshot"` 会继续使用当前的一次性 Claude CLI 调用方式。
+
+如需启用常驻模式，先安装可选依赖：
+
+```powershell
+python -m pip install -e ".[persistent]"
+```
+
+然后在配置中启用：
+
+```toml
+[claude]
+runner = "persistent"
+worker_idle_ttl_seconds = 900
+max_workers = 3
+persistent_enabled_chats = []
+```
+
+说明：
+
+- `persistent` 会按飞书对话保留 Claude worker，减少 CLI 冷启动和恢复 session 的耗时。
+- `persistent_enabled_chats = []` 表示所有对话都可尝试常驻；也可以填写指定 `chat_id` 或 `session_key` 先小范围启用。
+- 如果缺少 `claude-agent-sdk`、worker 启动失败或常驻调用异常，桥会自动回退 `oneshot`，不会导致整桥无响应。
+- 常驻模式不能替代长期记忆压缩。某个 Claude 会话上下文过大时，仍然需要使用会话翻页、摘要压缩或快速任务直通来降低 token。

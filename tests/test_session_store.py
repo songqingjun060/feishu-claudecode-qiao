@@ -92,6 +92,17 @@ def test_clear_memory_keeps_session_id(tmp_path):
     assert meta.memory_history == []
 
 
+def test_set_force_rollover_next(tmp_path):
+    path = tmp_path / "sessions.json"
+    store = SessionStore(path)
+
+    store.set_force_rollover_next("chat:c1", True)
+    assert store.get("chat:c1").force_rollover_next is True
+
+    store.set_force_rollover_next("chat:c1", False)
+    assert store.get("chat:c1").force_rollover_next is False
+
+
 def test_clear_session(tmp_path):
     path = tmp_path / "sessions.json"
     store = SessionStore(path)

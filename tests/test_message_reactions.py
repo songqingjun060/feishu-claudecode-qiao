@@ -214,6 +214,7 @@ def test_followup_after_bare_images_uses_all_cached_image_paths_once(tmp_path, m
     )
 
     assert len(prompts) == 1
+    assert "bridge_media_batch" in prompts[0]
     assert "bridge_recent_file" in prompts[0]
     assert str(image_1.resolve()) in prompts[0]
     assert str(image_2.resolve()) in prompts[0]

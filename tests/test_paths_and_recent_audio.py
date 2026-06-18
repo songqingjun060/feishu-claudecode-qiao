@@ -13,6 +13,7 @@ def make_bridge(tmp_path):
             bridge_data_dir=str(tmp_path / "data"),
             claude_work_dir=str(tmp_path),
             security_allowed_paths=[str(tmp_path)],
+            bridge_fast_tasks_enabled=False,
         )
     )
 
@@ -432,6 +433,95 @@ def test_bi_query_generated_excel_is_uploaded_immediately(tmp_path, monkeypatch)
 
     assert sent_files == [("oc_1", str(target.resolve()), "om_1")]
     assert replies == [("\u67e5\u8be2\u5b8c\u6210\uff0c\u5df2\u4e0a\u4f20\u6587\u4ef6\uff1abi-result.xlsx", "text")]
+
+
+def test_bi_query_fast_path_uploads_without_calling_claude(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.tasks.bi_logistics import BiLogisticsResult
+
+    bridge = make_bridge(tmp_path)
+    bridge.config = Config(
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
+        bridge_data_dir=str(tmp_path / "data"),
+        claude_work_dir=str(tmp_path),
+        security_allowed_paths=[str(tmp_path)],
+        bridge_fast_tasks_enabled=True,
+    )
+    target = tmp_path / "bi-fast.xlsx"
+    target.write_text("xlsx", encoding="utf-8")
+    sent_files = []
+    replies = []
+    requests = []
+
+    class FakeRunner:
+        def run(self, request):
+            requests.append(request)
+            return BiLogisticsResult(
+                ok=True,
+                summary="BI 物流码查询完成：共 1 条。",
+                excel_path=str(target),
+            )
+
+    bridge.bi_logistics_runner = FakeRunner()
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("BI 快速路径命中后不应调用 Claude")
+        ),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_local_file",
+        lambda chat_id, path, reply_to_message_id="": sent_files.append(
+            (chat_id, path, reply_to_message_id)
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_event_reply",
+        lambda chat_id, content, msg_type, chat_type, msg_id, sender, sender_name: replies.append(
+            (content, msg_type)
+        )
+        or True,
+    )
+
+    bridge._process_event_body(
+        make_event(
+            content_obj={"text": "@_user_1 Q202605270017-5/7 查询BI物流码"},
+            mentions=bot_mention(),
+        )
+    )
+
+    assert requests[0].sources == ["Q202605270017-5/7"]
+    assert sent_files == [("oc_1", str(target), "om_1")]
+    assert replies == [("BI 物流码查询完成：共 1 条。\n已上传文件：bi-fast.xlsx", "text")]
+
+
+def test_process_event_registers_active_run_while_calling_claude(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    statuses = []
+
+    def fake_call(prompt, *args, **kwargs):
+        statuses.append(bridge.scheduler.status("oc_1"))
+        return "ok", "sid_1"
+
+    monkeypatch.setattr(bridge, "_call_claude", fake_call)
+    monkeypatch.setattr(bridge, "_send_event_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event_body(
+        make_event(
+            chat_type="p2p",
+            content_obj={"text": "分析一下"},
+            message_id="om_active",
+        )
+    )
+
+    assert statuses
+    assert statuses[0].active_run_id
+    assert statuses[0].active_status == "running"
+    assert bridge.scheduler.status("oc_1").active_run_id == ""
 
 
 def test_unmentioned_group_audio_is_cached_when_event_arrives(tmp_path, monkeypatch):

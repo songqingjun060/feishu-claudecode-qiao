@@ -33,6 +33,19 @@ from .rule_engine import resolve_rule, build_session_key, EffectiveRule, permiss
 from .session_store import SessionStore
 from .commands import parse_command
 from .audit import AuditLogger
+from .claude_runner import (
+    ClaudeRunRequest,
+    ConditionalClaudeRunner,
+    FallbackClaudeRunner,
+    OneShotClaudeRunner,
+    PersistentClaudeRunner,
+)
+from .media_pipeline import MediaBatcher, MediaItem, RecentContext
+from .scheduler import ChatScheduler, QueuePolicy
+from .task_router import TaskContext, TaskRouter
+from .tasks.bi_logistics import BiLogisticsRequest, BiLogisticsRunner
+from .timing import RunTiming
+from .session_strategy import choose_session_strategy, should_force_rollover_after_timing
 
 _WORK_DIR = Path(__file__).parent.parent.resolve()
 _PROCESSING_REACTION_EMOJI = "OK"
@@ -149,6 +162,19 @@ class Bridge:
         self.session_store = SessionStore(self.sessions_file)
         self.session_store.load()
         self.audit = AuditLogger(self.data_dir / "logs" / "audit.jsonl")
+        self.scheduler = ChatScheduler(
+            QueuePolicy(
+                queue_notice_after_seconds=config.bridge_queue_notice_after_seconds,
+            )
+        )
+        self.media_batcher = MediaBatcher(
+            window_seconds=config.bridge_media_batch_window_seconds,
+        )
+        self.recent_context = RecentContext()
+        self.claude_runner = self._make_claude_runner()
+        self.bridge_logger.info(f"Claude runner: {config.claude_runner or 'oneshot'}")
+        self.task_router = TaskRouter()
+        self.bi_logistics_runner = BiLogisticsRunner()
         self._token: str | None = None
         self._token_expires = 0.0
         self._processed_ids: set[str] = set()
@@ -168,6 +194,31 @@ class Bridge:
             Path.home() / "\u684c\u9762",
             *drive_roots,
         ]
+
+    def _make_claude_runner(self):
+        oneshot = OneShotClaudeRunner(self._call_claude)
+        runner_kind = (self.config.claude_runner or "oneshot").lower()
+        if runner_kind != "persistent":
+            return oneshot
+
+        persistent = PersistentClaudeRunner(
+            cli_path=self.config.claude_command,
+            idle_ttl_seconds=self.config.claude_worker_idle_ttl_seconds,
+            max_workers=self.config.claude_max_workers,
+        )
+        persistent_with_fallback = FallbackClaudeRunner(persistent, oneshot)
+        enabled_chats = set(self.config.claude_persistent_enabled_chats or [])
+        if not enabled_chats:
+            return persistent_with_fallback
+
+        return ConditionalClaudeRunner(
+            persistent_with_fallback,
+            oneshot,
+            lambda request: (
+                request.chat_id in enabled_chats
+                or request.session_key in enabled_chats
+            ),
+        )
 
     def _sender_id(self, event_data: dict[str, Any]) -> str:
         sender_id = event_data.get("sender", {}).get("sender_id", {})
@@ -323,6 +374,57 @@ class Bridge:
             "created_at": now,
             "uploaded": uploaded,
         }
+
+    def _remember_media_item(
+        self,
+        chat_id: str,
+        chat_type: str,
+        sender: str,
+        *,
+        kind: str,
+        message_id: str,
+        path: str = "",
+        file_name: str = "",
+    ) -> None:
+        if not chat_id or not sender:
+            return
+        self.media_batcher.add_media(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            sender_id=sender,
+            item=MediaItem(
+                kind=kind,
+                message_id=message_id,
+                path=path,
+                file_name=file_name,
+            ),
+        )
+
+    def _media_batch_context_for_message(
+        self,
+        chat_id: str,
+        chat_type: str,
+        sender: str,
+        msg_id: str,
+        content: str,
+        *,
+        mentioned: bool,
+        reply_to_bot: bool = False,
+    ) -> str:
+        if not chat_id or not sender or not content.strip():
+            return ""
+        batch = self.media_batcher.add_text(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            sender_id=sender,
+            message_id=msg_id,
+            text=content,
+            mentioned=mentioned,
+            reply_to_bot=reply_to_bot,
+        )
+        if not batch.items:
+            return ""
+        return self.media_batcher.render_context(batch)
 
     def _cache_recent_image_message(
         self,
@@ -878,6 +980,103 @@ class Bridge:
         lines.append("</bridge_recent_file>")
         return "\n".join(lines) if added else ""
 
+    def _recent_file_paths(self, chat_id: str, effective_security: SecurityPolicy) -> list[str]:
+        recent = self._recent_files_by_chat.get(chat_id)
+        if not recent:
+            return []
+        if time.time() - float(recent.get("created_at", 0)) > 1800:
+            self._recent_files_by_chat.pop(chat_id, None)
+            return []
+        paths: list[str] = []
+        for candidate in recent.get("files", []) or []:
+            path = Path(str(candidate)).expanduser().resolve()
+            if not path.is_file():
+                continue
+            if not effective_security.explain_path(path).allowed:
+                continue
+            path_str = str(path)
+            if path_str not in paths:
+                paths.append(path_str)
+        return paths
+
+    def _try_handle_fast_task(
+        self,
+        *,
+        chat_id: str,
+        chat_type: str,
+        msg_id: str,
+        sender: str,
+        sender_name: str,
+        content: str,
+        effective_security: SecurityPolicy,
+    ) -> bool:
+        match = self.task_router.match(
+            content,
+            TaskContext(
+                chat_id=chat_id,
+                recent_files=self._recent_file_paths(chat_id, effective_security),
+            ),
+        )
+        if not match:
+            return False
+        if match.task_kind != "bi_logistics":
+            return False
+
+        self.audit.write(
+            "fast_task_started",
+            chat_id=chat_id,
+            sender=sender,
+            task_kind=match.task_kind,
+            confidence=match.confidence,
+        )
+        request = BiLogisticsRequest(
+            codes=match.params.get("codes", []),
+            sources=match.params.get("sources", []),
+            wms_orders=match.params.get("wms_orders", []),
+        )
+        result = self.bi_logistics_runner.run(request)
+        if not result.ok:
+            self.audit.write(
+                "fast_task_failed",
+                chat_id=chat_id,
+                sender=sender,
+                task_kind=match.task_kind,
+                error=result.error,
+            )
+            return False
+
+        uploaded = False
+        reply_text = result.summary or "BI 物流码查询完成。"
+        if result.excel_path:
+            path = Path(result.excel_path).expanduser().resolve()
+            if path.is_file() and effective_security.explain_path(path).allowed:
+                uploaded = self._send_local_file(
+                    chat_id,
+                    str(path),
+                    reply_to_message_id=msg_id if chat_type == "group" else "",
+                )
+                if uploaded:
+                    self._cache_recent_file_path(chat_id, str(path), uploaded=True)
+                    reply_text = f"{reply_text}\n已上传文件：{path.name}"
+        self._send_event_reply(
+            chat_id,
+            reply_text,
+            "text",
+            chat_type,
+            msg_id,
+            sender,
+            sender_name,
+        )
+        self.audit.write(
+            "fast_task_completed",
+            chat_id=chat_id,
+            sender=sender,
+            task_kind=match.task_kind,
+            uploaded=uploaded,
+            excel_path=result.excel_path,
+        )
+        return True
+
     def _file_tool_hint(self, path: str) -> str:
         suffix = Path(path).suffix.lower()
         if suffix == ".pdf":
@@ -1234,6 +1433,9 @@ class Bridge:
             self.bridge_logger.info("Stopping...")
         finally:
             self._save_sessions()
+            close_runner = getattr(self.claude_runner, "close_all", None)
+            if close_runner:
+                close_runner()
             self._stop_managed_websocket()
             _remove_pid(self.pid_file)
             self.bridge_logger.info("Bridge stopped.")
@@ -1292,6 +1494,9 @@ class Bridge:
         chat_id = message.get("chat_id", "")
         msg_type = message.get("message_type", "text")
         content_raw = message.get("content", "")
+        timing = RunTiming(f"run_{msg_id or int(time.time() * 1000)}")
+        timing.mark("received")
+        timing_written = False
         content_obj: Any = {}
         try:
             content_obj = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
@@ -1309,12 +1514,30 @@ class Bridge:
                 self._cache_recent_audio(chat_id, msg_id, content_obj, sender)
         elif msg_type == "file":
             if isinstance(content_obj, dict):
-                self._cache_recent_file_message(chat_id, msg_id, content_obj, sender)
+                file_path = self._cache_recent_file_message(chat_id, msg_id, content_obj, sender)
+                if file_path:
+                    self._remember_media_item(
+                        chat_id,
+                        chat_type,
+                        sender,
+                        kind="file",
+                        message_id=msg_id,
+                        path=file_path,
+                        file_name=str(content_obj.get("file_name", "")),
+                    )
         elif msg_type in ("image", "post") and chat_type == "group" and self.config.bridge_require_mention_in_group:
             bot_name = self.config.bridge_bot_display_name or "bot"
             mentions = message.get("mentions", [])
             if not self._is_mentioned(content, bot_name, mentions):
-                self._cache_recent_image_message(chat_id, msg_id, content_obj, content_raw)
+                for image_path in self._cache_recent_image_message(chat_id, msg_id, content_obj, content_raw):
+                    self._remember_media_item(
+                        chat_id,
+                        chat_type,
+                        sender,
+                        kind="image",
+                        message_id=msg_id,
+                        path=image_path,
+                    )
 
         if chat_type == "group" and self.config.bridge_require_mention_in_group:
             bot_name = self.config.bridge_bot_display_name or "bot"
@@ -1340,6 +1563,9 @@ class Bridge:
         chat_id = message.get("chat_id", "")
         msg_type = message.get("message_type", "text")
         content_raw = message.get("content", "")
+        timing = RunTiming(f"run_{msg_id or int(time.time() * 1000)}")
+        timing.mark("received")
+        timing_written = False
 
         # Parse content JSON
         try:
@@ -1365,8 +1591,20 @@ class Bridge:
             or "用户"
         )
 
+        def write_timing_once(session_key: str = "") -> None:
+            nonlocal timing_written
+            if timing_written:
+                return
+            timing_written = True
+            self.audit.write_timing(
+                timing,
+                chat_id=chat_id,
+                message_id=msg_id,
+                session_key=session_key,
+            )
+
         def reply(reply_content: str, reply_msg_type: str = "text") -> bool:
-            return self._send_event_reply(
+            result = self._send_event_reply(
                 chat_id,
                 reply_content,
                 reply_msg_type,
@@ -1375,6 +1613,9 @@ class Bridge:
                 sender,
                 sender_name,
             )
+            timing.mark("reply_sent")
+            write_timing_once()
+            return result
 
         # Log incoming message
         self.msg_logger.info("=" * 50)
@@ -1385,14 +1626,24 @@ class Bridge:
         # Skip bot's own messages
         if sender == self.config.feishu_app_id:
             self.msg_logger.debug("Skip bot's own message")
+            timing.mark("skipped_self")
+            write_timing_once()
             return
+
+        bot_name = self.config.bridge_bot_display_name or "bot"
+        mentions = message.get("mentions", [])
+        mentioned_for_batch = (
+            self._is_mentioned(content, bot_name, mentions)
+            if chat_type == "group"
+            else True
+        )
 
         # Group mention check
         if chat_type == "group" and self.config.bridge_require_mention_in_group:
-            bot_name = self.config.bridge_bot_display_name or "bot"
-            mentions = message.get("mentions", [])
-            if not self._is_mentioned(content, bot_name, mentions):
+            if not mentioned_for_batch:
                 self.msg_logger.debug("Bot not mentioned in group, skipping")
+                timing.mark("skipped_unmentioned")
+                write_timing_once()
                 return
 
         # Resolve rules
@@ -1408,6 +1659,7 @@ class Bridge:
                 },
             )
         effective_security = self._security_for_rule(effective_rule)
+        timing.mark("rules_resolved")
 
         # Security check (after rule resolution)
         is_blocked, warning = effective_security.check_message(content)
@@ -1541,6 +1793,17 @@ class Bridge:
             self._send_event_reply(chat_id, command_reply, "text", chat_type, msg_id, sender, sender_name)
             return
 
+        if self.config.bridge_fast_tasks_enabled and self._try_handle_fast_task(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            msg_id=msg_id,
+            sender=sender,
+            sender_name=sender_name,
+            content=content,
+            effective_security=effective_security,
+        ):
+            return
+
         onboarding_requested = cmd.is_command or any(
             word in content for word in ("规则", "设置", "权限", "命令", "帮助", "workspace", "allowed_paths")
         )
@@ -1556,9 +1819,26 @@ class Bridge:
                 sender_name,
             )
 
+        strategy_content = content
+
         content = self._append_verified_path_context(content, allowed_path_candidates)
 
+        media_batch_context = ""
+        if msg_type == "text":
+            media_batch_context = self._media_batch_context_for_message(
+                chat_id,
+                chat_type,
+                sender,
+                msg_id,
+                content,
+                mentioned=mentioned_for_batch,
+                reply_to_bot=False,
+            )
+        if media_batch_context:
+            content += media_batch_context
+
         memory_context = self._memory_context_for_prompt(session_key, effective_rule)
+        memory_context_chars = len(memory_context)
         if memory_context:
             content += memory_context
 
@@ -1576,18 +1856,29 @@ class Bridge:
 
         # Check rollover BEFORE getting session_id
         rollover_summary = ""
-        if session_key:
+        session_meta = self.session_store.get(session_key) if session_key else None
+        if session_key and session_meta and getattr(session_meta, "force_rollover_next", False):
+            rollover_summary = self._maybe_rollover_session(session_key, effective_rule, force=True)
+            self.session_store.set_force_rollover_next(session_key, False)
+            session_meta = self.session_store.get(session_key)
+        elif session_key:
             rollover_summary = self._maybe_rollover_session(session_key, effective_rule)
+            session_meta = self.session_store.get(session_key)
 
         # Get session_id after rollover (may have been cleared)
-        session_id = self.session_store.get(session_key).session_id if session_key else None
-        if not session_id:
-            session_id = None
+        session_decision = choose_session_strategy(
+            strategy_content,
+            msg_type=msg_type,
+            session_meta=session_meta,
+            effective_rule=effective_rule.data,
+        )
+        session_id = session_decision.session_id
 
         # Handle media messages
         img_path: str | None = None
         image_paths: list[str] = []
         if msg_type == "image":
+            timing.mark("media_start")
             image_paths = self._cache_recent_image_message(
                 chat_id,
                 msg_id,
@@ -1595,6 +1886,15 @@ class Bridge:
                 content_raw,
             )
             img_path = image_paths[-1] if image_paths else None
+            for image_path in image_paths:
+                self._remember_media_item(
+                    chat_id,
+                    chat_type,
+                    sender,
+                    kind="image",
+                    message_id=msg_id,
+                    path=image_path,
+                )
             self.msg_logger.info(f"Image downloaded: {img_path}")
             self.audit.write(
                 "image_cached",
@@ -1602,8 +1902,11 @@ class Bridge:
                 sender=sender,
                 count=len(image_paths),
             )
+            timing.mark("media_cached")
+            write_timing_once(session_key or "")
             return
         elif msg_type == "audio":
+            timing.mark("media_start")
             transcribed = self._process_audio(msg_id, content_obj)
             if transcribed:
                 content = transcribed
@@ -1611,13 +1914,24 @@ class Bridge:
             else:
                 content = "[\u8bed\u97f3\u6d88\u606f]"
         elif msg_type == "file":
+            timing.mark("media_start")
             recent = self._recent_files_by_chat.get(chat_id)
             recent_files = [str(path) for path in (recent or {}).get("files", [])]
             file_info = recent_files[-1] if recent_files else self._process_file(msg_id, content_obj)
             if file_info:
                 self._cache_recent_file_path(chat_id, file_info)
+                self._remember_media_item(
+                    chat_id,
+                    chat_type,
+                    sender,
+                    kind="file",
+                    message_id=msg_id,
+                    path=file_info,
+                    file_name=str(content_obj.get("file_name", "")) if isinstance(content_obj, dict) else "",
+                )
             content = f"[\u6587\u4ef6] {file_info or ''}"
         elif msg_type == "post":
+            timing.mark("media_start")
             image_paths = self._cache_recent_image_message(
                 chat_id,
                 msg_id,
@@ -1625,6 +1939,15 @@ class Bridge:
                 content_raw,
             )
             img_path = image_paths[-1] if image_paths else None
+            for image_path in image_paths:
+                self._remember_media_item(
+                    chat_id,
+                    chat_type,
+                    sender,
+                    kind="image",
+                    message_id=msg_id,
+                    path=image_path,
+                )
             if image_paths:
                 self.msg_logger.info(f"Post images downloaded: {len(image_paths)}")
             post_text = self._extract_post_text(content_obj)
@@ -1641,6 +1964,8 @@ class Bridge:
                     sender=sender,
                     count=len(image_paths),
                 )
+                timing.mark("media_cached")
+                write_timing_once(session_key or "")
                 return
 
         # Build prompt with rollover summary
@@ -1650,8 +1975,18 @@ class Bridge:
             content_for_prompt = f"{rollover_summary}\n\n当前用户消息:\n{content}"
 
         # Call Claude and send reply
+        active_run = self.scheduler.start_run(
+            chat_id=chat_id,
+            message_id=msg_id,
+            sender_id=sender,
+            content=content,
+        )
+        active_run_id = active_run.run_id
         try:
             prompt = self._build_prompt(chat_id, sender_name, content_for_prompt, effective_rule)
+            prompt_chars = len(prompt)
+            self.scheduler.update_stage(active_run_id, "prompt_built")
+            timing.mark("prompt_built")
 
             effective_workspace = effective_rule.get("workspace") or self.config.claude_work_dir
             permission_mode = permission_mode_for_profile(
@@ -1664,13 +1999,35 @@ class Bridge:
                 session_id,
                 session_key,
                 effective_rule,
+                chat_id=chat_id,
                 cwd=effective_workspace,
                 permission_mode=permission_mode,
             )
-            if session_key and new_session:
+            self.scheduler.update_stage(active_run_id, "claude_completed")
+            timing.mark("claude_completed")
+            if session_key and new_session and session_decision.strategy in {"work", "fresh"}:
                 self.session_store.update_session_id(session_key, new_session)
-            if session_key:
+            if session_key and session_decision.remember_turn:
                 self.session_store.record_turn(session_key, len(prompt), len(reply), attachment_task=bool(img_path or msg_type in ("audio", "file")))
+
+            claude_ms = timing.stage_ms().get("prompt_built_to_claude_completed", 0)
+            if session_key and should_force_rollover_after_timing(
+                prompt_built_to_claude_completed_ms=claude_ms,
+                threshold_ms=int((effective_rule.get("context_policy", {}) or {}).get("slow_response_ms", 30000)),
+            ):
+                self.session_store.set_force_rollover_next(session_key, True)
+            self.audit.write(
+                "context_decision",
+                chat_id=chat_id,
+                sender=sender,
+                session_key=session_key or "",
+                strategy=session_decision.strategy,
+                reason=session_decision.reason,
+                prompt_chars=prompt_chars,
+                memory_context_chars=memory_context_chars,
+                resumed=bool(session_id),
+                claude_ms=claude_ms,
+            )
 
             self._cache_recent_files_from_text(chat_id, reply, effective_security)
 
@@ -1699,6 +2056,8 @@ class Bridge:
                     path=uploaded_generated_table,
                     success=True,
                 )
+                timing.mark("file_sent")
+                write_timing_once(session_key or "")
                 return
 
             uploaded_reply_file = self._maybe_upload_file_from_claude_reply(
@@ -1726,20 +2085,26 @@ class Bridge:
                     path=uploaded_reply_file,
                     success=True,
                 )
+                timing.mark("file_sent")
+                write_timing_once(session_key or "")
                 return
 
             content_str, msg_fmt = auto_detect_format(reply)
             self._send_event_reply(chat_id, content_str, msg_fmt, chat_type, msg_id, sender, sender_name)
+            timing.mark("reply_sent")
 
             self.msg_logger.info(f"✅ 回复已发送 ({len(reply)} chars)")
             self.msg_logger.info("=" * 50)
             self.audit.write("reply_sent", chat_id=chat_id, sender=sender, session_key=session_key, msg_type=msg_fmt)
+            write_timing_once(session_key or "")
 
         except Exception as e:
             self.bridge_logger.exception(f"处理消息失败: {e}")
             reply(
                 f"处理消息时出错: {e}",
             )
+        finally:
+            self.scheduler.finish(active_run_id)
 
     def _can_modify_chat_rule(
         self,
@@ -1796,6 +2161,14 @@ class Bridge:
             return self._cmd_memory(session_key, cmd.args)
         elif cmd.name == "ask":
             return self._cmd_ask(chat_id, sender, sender_name, cmd.args, chat_rule)
+        elif cmd.name == "status":
+            return self._cmd_status(chat_id)
+        elif cmd.name == "queue":
+            return self._cmd_queue(chat_id)
+        elif cmd.name == "stop":
+            return self._cmd_stop(chat_id)
+        elif cmd.name == "ps":
+            return self._cmd_ps()
         elif cmd.name == "reset":
             if session_key:
                 action = (cmd.args or "session").strip().lower()
@@ -1969,6 +2342,10 @@ class Bridge:
 /memory history - 查看最近长期记忆历史
 /memory clear - 清空当前对话长期记忆
 /ask <问题> - 单次无历史问答
+/status - 查看当前聊天正在运行的任务
+/queue - 查看当前聊天排队任务数量
+/stop - 请求停止当前聊天正在运行的任务
+/ps - 查看桥内全部正在运行的任务
 /new - 开启新会话
 /reset - 重置当前会话
 /compact - 强制生成交接摘要
@@ -2001,6 +2378,37 @@ class Bridge:
 - workspace 是 Claude Code 的当前工作目录。
 - allowed_paths 可以有多个，用 /paths add 或 /paths set 管理。
 - 群规则只对当前群生效。"""
+
+    def _cmd_status(self, chat_id: str) -> str:
+        status = self.scheduler.status(chat_id)
+        if not status.active_run_id and status.queued_count == 0:
+            return "当前没有运行中的任务，队列为空。"
+        active = f"运行中: {status.active_run_id} ({status.active_status})" if status.active_run_id else "运行中: 无"
+        return f"{active}\n排队: {status.queued_count} 个"
+
+    def _cmd_queue(self, chat_id: str) -> str:
+        status = self.scheduler.status(chat_id)
+        if status.queued_count == 0:
+            return "当前队列为空。"
+        return f"当前排队 {status.queued_count} 个任务。"
+
+    def _cmd_stop(self, chat_id: str) -> str:
+        if self.scheduler.cancel(chat_id):
+            return "已请求停止当前任务。"
+        return "当前没有运行中的任务。"
+
+    def _cmd_ps(self) -> str:
+        runs = self.scheduler.active_runs()
+        if not runs:
+            return "当前没有运行中的任务。"
+        lines = ["当前运行任务："]
+        for run in runs:
+            queued = self.scheduler.status(run.chat_id).queued_count
+            lines.append(
+                f"- chat={run.chat_id} run={run.run_id} status={run.status} "
+                f"stage={run.current_stage} queued={queued}"
+            )
+        return "\n".join(lines)
 
     def _cmd_rules(self, effective_rule) -> str:
         allowed_paths = effective_rule.get("allowed_paths") or []
@@ -2509,12 +2917,15 @@ Rules:
         session_key: str | None,
         effective_rule,
         *,
+        chat_id: str | None = None,
         cwd: str | None = None,
         permission_mode: str | None = None,
     ) -> tuple[str, str | None]:
-        reply, new_session = self._call_claude(
+        reply, new_session = self._run_claude(
             prompt,
             session_id,
+            session_key=session_key,
+            chat_id=chat_id,
             cwd=cwd,
             permission_mode=permission_mode,
         )
@@ -2522,9 +2933,11 @@ Rules:
         if self._is_transient_claude_error(reply):
             self.bridge_logger.warning("Claude returned transient server error; retrying once")
             time.sleep(3)
-            reply, new_session = self._call_claude(
+            reply, new_session = self._run_claude(
                 prompt,
                 session_id,
+                session_key=session_key,
+                chat_id=chat_id,
                 cwd=cwd,
                 permission_mode=permission_mode,
             )
@@ -2536,9 +2949,11 @@ Rules:
                 f"Claude session missing, retrying without session: {session_id}"
             )
             self.session_store.clear_session_id(session_key)
-            return self._call_claude(
+            return self._run_claude(
                 prompt,
                 None,
+                session_key=session_key,
+                chat_id=chat_id,
                 cwd=cwd,
                 permission_mode=permission_mode,
             )
@@ -2547,14 +2962,43 @@ Rules:
             self.bridge_logger.warning("Claude context limit reached; rolling over and retrying")
             memory_context = self._maybe_rollover_session(session_key, effective_rule, force=True)
             retry_prompt = f"{memory_context}\n\n当前用户消息:\n{prompt}" if memory_context else prompt
-            return self._call_claude(
+            return self._run_claude(
                 retry_prompt,
                 None,
+                session_key=session_key,
+                chat_id=chat_id,
                 cwd=cwd,
                 permission_mode=permission_mode,
             )
 
         return reply, new_session
+
+    def _run_claude(
+        self,
+        prompt: str,
+        session_id: str | None,
+        *,
+        session_key: str | None = None,
+        chat_id: str | None = None,
+        cwd: str | None = None,
+        permission_mode: str | None = None,
+    ) -> tuple[str, str | None]:
+        runner = self.claude_runner
+        if isinstance(runner, OneShotClaudeRunner):
+            runner = OneShotClaudeRunner(self._call_claude)
+        result = runner.run(
+            ClaudeRunRequest(
+                prompt=prompt,
+                session_id=session_id,
+                cwd=cwd,
+                permission_mode=permission_mode,
+                session_key=session_key or "",
+                chat_id=chat_id or "",
+            )
+        )
+        if result.error:
+            return f"[错误: 无法调用Claude CLI: {result.error}]", result.session_id
+        return result.text, result.session_id
 
     # ------------------------------------------------------------------
     # Feishu API

@@ -137,6 +137,85 @@ def test_process_event_retries_when_saved_claude_session_is_missing(tmp_path, mo
     assert bridge.session_store.get("chat:oc_1").session_id == "new_sid"
 
 
+def test_short_text_on_heavy_session_uses_light_session_without_overwriting_work_session(tmp_path, monkeypatch):
+    import json
+
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.archive_and_rollover(
+        "chat:oc_1",
+        "old summary",
+        "old_sid",
+        rolling_summary="这个对话经常处理 BI、Excel、表格和物流码。",
+    )
+    bridge.session_store.update_session_id("chat:oc_1", "work_sid")
+    bridge.session_store.record_turn("chat:oc_1", 25_000, 100)
+    calls = []
+    sent = []
+
+    def fake_call(prompt, sid, **kwargs):
+        calls.append(sid)
+        return ("light reply", "light_sid")
+
+    monkeypatch.setattr(bridge, "_call_claude", fake_call)
+    monkeypatch.setattr(bridge, "_send_reply", lambda chat_id, content, msg_type="text": sent.append(content) or True)
+
+    event = {
+        "event": {
+            "sender": {"sender_id": {"user_id": "ou_1", "name": "tester"}},
+            "message": {
+                "chat_id": "oc_1",
+                "chat_type": "p2p",
+                "content": json.dumps({"text": "现在速度怎么样"}),
+                "message_id": "om_light",
+                "message_type": "text",
+            },
+        }
+    }
+
+    bridge._process_event_body(event)
+
+    assert calls == [None]
+    assert "light reply" in sent[-1]
+    assert bridge.session_store.get("chat:oc_1").session_id == "work_sid"
+
+
+def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monkeypatch):
+    import json
+
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:oc_1", "work_sid")
+    bridge.session_store.record_turn("chat:oc_1", 25_000, 100)
+    sent = []
+
+    monkeypatch.setattr(bridge, "_call_claude", lambda prompt, sid, **kwargs: ("ok", "light_sid"))
+    monkeypatch.setattr(bridge, "_send_reply", lambda chat_id, content, msg_type="text": sent.append(content) or True)
+
+    event = {
+        "event": {
+            "sender": {"sender_id": {"user_id": "ou_1", "name": "tester"}},
+            "message": {
+                "chat_id": "oc_1",
+                "chat_type": "p2p",
+                "content": json.dumps({"text": "现在速度怎么样"}),
+                "message_id": "om_audit",
+                "message_type": "text",
+            },
+        }
+    }
+
+    bridge._process_event_body(event)
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    decision = [record for record in records if record.get("action") == "context_decision"][-1]
+    assert decision["strategy"] == "light"
+    assert decision["prompt_chars"] > 0
+    assert "memory_context_chars" in decision
+    assert decision["resumed"] is False
+
+
 def test_call_claude_with_recovery_retries_transient_500(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     calls = []

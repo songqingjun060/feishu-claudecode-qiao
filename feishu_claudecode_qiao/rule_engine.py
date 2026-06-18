@@ -41,6 +41,10 @@ DEFAULT_RULE = {
         "history_item_max_chars": 4000,
         "inject_max_chars": 4000,
     },
+    "session_strategy": {
+        "mode": "auto",
+        "light_text_max_chars": 120,
+    },
     "output_policy": {
         "verbosity": "normal",
         "long_reply_mode": "summary_then_file",

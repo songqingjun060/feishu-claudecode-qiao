@@ -82,6 +82,10 @@ POST /open-apis/im/v1/messages/{message_id}/reply
 - 图片是否在 30 分钟近期上下文窗口内。
 - 图片消息和任务文本是否在同一个飞书对话框。
 - 群聊里是否已经正确 @ 当前机器人。
+- 群聊里图片和后续任务文本是否来自同一发送人。
+- `bridge.media_batch_window_seconds` 是否被设置得过短。
+
+图片内容本身仍由 Claude Code 和本机工具读取。桥只负责下载、保存路径、合并上下文，不会默认启用额外的 Vision 中间层。
 
 ## 私聊音频正常但群聊音频不正常
 
@@ -123,6 +127,18 @@ im:message.group_msg
 
 桥不会自动复制用户机器上的运行文件；必须先解析并校验路径。
 
+## BI 物流码快速路径没有命中
+
+快速路径只在确定性较高时启用。请检查：
+
+- `bridge.fast_tasks_enabled` 是否为 `true`。
+- 文本里是否明确包含“BI”“物流码”“查询”等词。
+- 是否能从消息里提取来源单号、WMS 配货单号或物流码。
+- `C:\Users\tanks\BI-wuliumachaxun` 下是否存在 `query-logistics-codes.js` 或 `BI-wuliumachaxun.exe`。
+- BI 工具本身是否能在 PowerShell 中独立执行。
+
+快速路径失败时桥会降级给 Claude Code，避免任务直接丢失。排查耗时请看 `data/logs/audit.jsonl` 中的 `fast_task_started`、`fast_task_completed`、`fast_task_failed`。
+
 ## Claude 提示无法读取本地文件
 
 这里有两层权限：
@@ -137,6 +153,15 @@ im:message.group_msg
 如果每次对话都像新会话，先检查当前会话是否使用了 `stateless`，或是否被频繁 `/reset all` 清空长期记忆。
 
 默认策略会尽量延续当前 Claude session，并在 session 异常或上下文超限时携带长期记忆开启新 session。长期记忆保存在 `data/sessions.json` 的会话记录中，重启桥后仍可加载。
+
+当前稳定 runner 是 `claude.runner = "oneshot"`：桥会保留 `session_id`，但每条消息仍会新启动一次 Claude CLI。`persistent` 和 `tmux` 是后续实验模式，启用前应先确认测试和回退策略。
+
+如果要判断慢在哪里，优先查看 `data/logs/audit.jsonl` 中的 `message_timing`：
+
+- `received_to_rules_resolved` 偏大：事件解析或规则读取慢。
+- `prompt_built_to_claude_completed` 偏大：Claude CLI 启动、session 恢复、模型推理或工具调用慢。
+- `claude_completed_to_file_sent` 偏大：本地文件上传到飞书或发送消息慢。
+- `media_start_to_media_cached` 偏大：图片、语音或文件下载/转写慢。
 
 可用命令：
 
@@ -227,3 +252,25 @@ data/logs/audit.jsonl      安全决策和回复事件
 ```
 
 不要公开分享日志；日志可能包含聊天内容、本地路径和敏感配置线索。
+## Claude 常驻模式没有生效
+
+先看前台窗口或 `bridge.log`，启动时应该能看到类似：
+
+```text
+Claude runner: persistent
+```
+
+如果仍然显示 `oneshot`，请检查当前启动命令使用的配置文件是不是你修改过的那个，例如：
+
+```powershell
+.\start_all.ps1 -Restart -Foreground -Config config.realtest.toml
+```
+
+如果配置为 `persistent` 但实际响应仍然像 one-shot，常见原因：
+
+- 没有安装可选依赖：`python -m pip install -e ".[persistent]"`
+- `persistent_enabled_chats` 只允许了某些 `chat_id` 或 `session_key`，当前对话不在列表里。
+- 常驻 worker 启动或调用失败，桥自动回退到 `oneshot`。这种情况下桥仍会回复，但日志里会出现 SDK 或 worker 相关错误。
+- 当前 Claude session 上下文过大。常驻能减少进程冷启动，但不能让 6 万 token 的上下文瞬间变小，需要配合 `/rollover`、长期记忆压缩或固定任务快速路径。
+
+建议先只给个人会话或一个测试群开启常驻，确认稳定后再扩大范围。

@@ -24,3 +24,10 @@ def test_unknown_command_still_parsed():
     cmd = parse_command("/unknown")
     assert cmd.is_command
     assert cmd.name == "unknown"
+
+
+def test_runtime_status_commands_parse():
+    for name in ("status", "queue", "stop", "ps"):
+        cmd = parse_command(f"/{name}")
+        assert cmd.is_command
+        assert cmd.name == name

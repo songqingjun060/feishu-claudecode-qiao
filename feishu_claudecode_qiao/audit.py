@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .timing import RunTiming
+
 
 class AuditLogger:
     def __init__(self, path: str | Path) -> None:
@@ -19,3 +21,12 @@ class AuditLogger:
         }
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+    def write_timing(self, timing: RunTiming, **fields: Any) -> None:
+        self.write(
+            "message_timing",
+            run_id=timing.run_id,
+            marks=timing.marks(),
+            stage_ms=timing.stage_ms(),
+            **fields,
+        )
