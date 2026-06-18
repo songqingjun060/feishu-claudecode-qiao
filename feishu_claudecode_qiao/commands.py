@@ -22,6 +22,8 @@ SUPPORTED_COMMANDS = {
     "paths",
     "permission",
     "memory",
+    "soul",
+    "runtime",
     "ask",
     "status",
     "queue",

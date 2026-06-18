@@ -217,3 +217,5 @@ persistent_enabled_chats = []
 - `persistent_enabled_chats = []` 表示所有对话都可尝试常驻；也可以填写指定 `chat_id` 或 `session_key` 先小范围启用。
 - 如果缺少 `claude-agent-sdk`、worker 启动失败或常驻调用异常，桥会自动回退 `oneshot`，不会导致整桥无响应。
 - 常驻模式不能替代长期记忆压缩。某个 Claude 会话上下文过大时，仍然需要使用会话翻页、摘要压缩或快速任务直通来降低 token。
+- 部署后可以在飞书发送 `/runtime` 查看当前 runner 和 worker 复用状态；发送 `/memory refresh` 可以手动压缩当前对话并刷新长期记忆。
+- 每个群或个人会话可以用 `/soul`、`/soul set role ...`、`/soul set tone ...` 设置独立角色，不会影响其他对话。

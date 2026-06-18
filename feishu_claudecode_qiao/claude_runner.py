@@ -58,6 +58,14 @@ class OneShotClaudeRunner:
             request.on_text(text)
         return ClaudeRunResult(text=text, session_id=session_id, error="")
 
+    def stats(self) -> dict[str, Any]:
+        return {
+            "kind": "oneshot",
+            "active_workers": 0,
+            "max_workers": 0,
+            "workers": [],
+        }
+
 
 class FallbackClaudeRunner:
     def __init__(self, primary: ClaudeRunner, fallback: ClaudeRunner) -> None:
@@ -75,6 +83,18 @@ class FallbackClaudeRunner:
             )
         return fallback_result
 
+    def stats(self) -> dict[str, Any]:
+        primary_stats = getattr(self.primary, "stats", lambda: {"kind": type(self.primary).__name__})()
+        fallback_stats = getattr(self.fallback, "stats", lambda: {"kind": type(self.fallback).__name__})()
+        return {
+            "kind": "fallback",
+            "primary": primary_stats,
+            "fallback": fallback_stats,
+            "active_workers": primary_stats.get("active_workers", 0),
+            "max_workers": primary_stats.get("max_workers", 0),
+            "workers": primary_stats.get("workers", []),
+        }
+
 
 class ConditionalClaudeRunner:
     def __init__(
@@ -91,6 +111,18 @@ class ConditionalClaudeRunner:
         if self.enabled(request):
             return self.primary.run(request)
         return self.fallback.run(request)
+
+    def stats(self) -> dict[str, Any]:
+        primary_stats = getattr(self.primary, "stats", lambda: {"kind": type(self.primary).__name__})()
+        fallback_stats = getattr(self.fallback, "stats", lambda: {"kind": type(self.fallback).__name__})()
+        return {
+            "kind": "conditional",
+            "primary": primary_stats,
+            "fallback": fallback_stats,
+            "active_workers": primary_stats.get("active_workers", 0),
+            "max_workers": primary_stats.get("max_workers", 0),
+            "workers": primary_stats.get("workers", []),
+        }
 
 
 @dataclass
@@ -163,6 +195,26 @@ class PersistentClaudeRunner:
             self._thread.join(timeout=5)
         self._loop = None
         self._thread = None
+
+    def stats(self) -> dict[str, Any]:
+        now = self._now()
+        workers = []
+        for key, worker in self._workers.items():
+            workers.append(
+                {
+                    "key": key,
+                    "busy": worker.busy,
+                    "idle_seconds": int(max(0, now - worker.last_used)),
+                    "startup_loaded": bool(worker.startup_prompt),
+                }
+            )
+        return {
+            "kind": "persistent_sdk",
+            "active_workers": len(self._workers),
+            "max_workers": self.max_workers,
+            "idle_ttl_seconds": self.idle_ttl_seconds,
+            "workers": workers,
+        }
 
     def _ensure_loop(self) -> asyncio.AbstractEventLoop:
         with self._loop_lock:

@@ -184,6 +184,26 @@ def test_persistent_runner_injects_startup_prompt_once_per_worker():
     assert FakeSDKClient.created[0].queries == ["soul", "one", "two"]
 
 
+def test_persistent_runner_stats_lists_workers():
+    FakeSDKClient.created = []
+    runner = PersistentClaudeRunner(
+        client_cls=FakeSDKClient,
+        options_cls=FakeSDKOptions,
+        idle_ttl_seconds=30,
+        max_workers=2,
+        now=lambda: 100.0,
+    )
+
+    runner.run(ClaudeRunRequest(prompt="hello", session_key="chat:stats", startup_prompt="soul"))
+    stats = runner.stats()
+
+    assert stats["kind"] == "persistent_sdk"
+    assert stats["active_workers"] == 1
+    assert stats["max_workers"] == 2
+    assert stats["workers"][0]["key"] == "chat:stats"
+    assert stats["workers"][0]["startup_loaded"] is True
+
+
 def test_persistent_runner_returns_error_when_sdk_is_unavailable():
     runner = PersistentClaudeRunner(client_cls=None, options_cls=None, sdk_available=False)
 

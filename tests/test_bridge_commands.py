@@ -60,6 +60,19 @@ def test_parse_memory_command():
     assert cmd.args == "history"
 
 
+def test_parse_soul_and_runtime_commands():
+    from feishu_claudecode_qiao.commands import parse_command
+
+    soul = parse_command("/soul set tone 稳一点")
+    runtime = parse_command("/runtime")
+
+    assert soul.is_command
+    assert soul.name == "soul"
+    assert soul.args == "set tone 稳一点"
+    assert runtime.is_command
+    assert runtime.name == "runtime"
+
+
 def test_parse_rollover_command():
     from feishu_claudecode_qiao.commands import parse_command
     cmd = parse_command("/rollover")
@@ -94,6 +107,112 @@ def test_cmd_memory_show_and_clear(tmp_path):
     meta = bridge.session_store.get("chat:c1")
     assert meta.session_id == "sess_2"
     assert meta.memory["rolling_summary"] == ""
+
+
+def test_memory_refresh_command_forces_rollover(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+    called = []
+
+    def fake_rollover(session_key, rule, force=False):
+        called.append((session_key, force))
+        return "<chat_memory>fresh memory</chat_memory>"
+
+    monkeypatch.setattr(bridge, "_maybe_rollover_session", fake_rollover)
+
+    reply = bridge._handle_command(
+        Command("memory", "refresh", True),
+        resolve_rule({}),
+        "chat:c1",
+        "c1",
+        "u1",
+        "tester",
+        {},
+        "p2p",
+    )
+
+    assert called == [("chat:c1", True)]
+    assert "已刷新" in reply
+
+
+def test_soul_command_show_set_and_reset(tmp_path):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+
+    set_reply = bridge._handle_command(
+        Command("soul", "set tone 稳一点，少废话", True),
+        resolve_rule({}),
+        "chat:c1",
+        "c1",
+        "u1",
+        "tester",
+        {},
+        "p2p",
+    )
+    rule = bridge.chat_rules.get("c1")
+    assert rule["soul"]["tone"] == "稳一点，少废话"
+    assert "tone" in set_reply
+
+    show_reply = bridge._handle_command(
+        Command("soul", "", True),
+        resolve_rule(rule),
+        "chat:c1",
+        "c1",
+        "u1",
+        "tester",
+        rule,
+        "p2p",
+    )
+    assert "稳一点" in show_reply
+
+    reset_reply = bridge._handle_command(
+        Command("soul", "reset", True),
+        resolve_rule(rule),
+        "chat:c1",
+        "c1",
+        "u1",
+        "tester",
+        rule,
+        "p2p",
+    )
+    assert bridge.chat_rules.get("c1")["soul"] == {}
+    assert "已重置" in reset_reply
+
+
+def test_runtime_command_reports_runner_stats(tmp_path):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+
+    class RunnerWithStats:
+        def stats(self):
+            return {
+                "kind": "persistent",
+                "active_workers": 1,
+                "max_workers": 3,
+                "workers": [{"key": "chat:c1", "busy": False, "age_seconds": 2, "idle_seconds": 1}],
+            }
+
+    bridge.claude_runner = RunnerWithStats()
+
+    reply = bridge._handle_command(
+        Command("runtime", "", True),
+        resolve_rule({}),
+        "chat:c1",
+        "c1",
+        "u1",
+        "tester",
+        {},
+        "p2p",
+    )
+
+    assert "persistent" in reply
+    assert "chat:c1" in reply
 
 
 def test_reset_session_keeps_memory(tmp_path):

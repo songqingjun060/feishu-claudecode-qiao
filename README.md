@@ -241,8 +241,31 @@ default -> chat -> member -> temporary
 | `/reset all` | 清空当前对话的 `session_id` 和长期记忆 |
 | `/memory` | 查看当前对话框的长期记忆 |
 | `/memory history` | 查看最近保存过的记忆摘要 |
+| `/memory refresh` | 立即压缩当前 Claude 会话并刷新长期记忆 |
 | `/memory clear` | 只清空长期记忆，保留当前 `session_id` |
 | `/compact` | 强制压缩当前 Claude 会话上下文 |
+
+每个飞书对话框还可以有独立的 `soul`，用于定义这个 chat 里的机器人角色、语气、业务背景和输出风格。它会在当前 chat 的常驻运行体启动时注入一次，后续普通消息只增量发送。
+
+| 命令 | 作用 |
+|---|---|
+| `/soul` | 查看当前对话框的角色设定 |
+| `/soul set name <名称>` | 设置角色名称 |
+| `/soul set role <角色>` | 设置当前对话框里的职责定位 |
+| `/soul set tone <语气>` | 设置回复语气 |
+| `/soul set business <业务背景>` | 设置业务背景 |
+| `/soul set style <输出风格>` | 设置输出格式偏好 |
+| `/soul reset` | 重置当前对话框的角色设定 |
+| `/runtime` | 查看当前 Claude runner 和常驻 worker 状态 |
+
+示例：
+
+```text
+/soul set role 当前群的仓库和物流协作助手
+/soul set tone 简洁、稳一点，优先给可执行结论
+/memory refresh
+/runtime
+```
 
 如需关闭长期记忆，请在对应会话规则里设置：
 

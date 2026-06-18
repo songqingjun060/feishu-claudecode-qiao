@@ -169,9 +169,13 @@ im:message.group_msg
 /context
 /memory
 /memory history
+/memory refresh
+/runtime
 ```
 
 如果不希望注入长期记忆，请在对应会话规则中设置 `memory_policy.enabled = false`，而不是删除真实数据文件。
+
+如果当前对话框需要固定角色、语气或业务背景，可以用 `/soul` 查看，并用 `/soul set role ...`、`/soul set tone ...` 等命令调整。`soul` 是按 chat 保存的，不会影响其他群或个人会话。
 
 ## 会话频繁翻页
 
@@ -192,6 +196,7 @@ im:message.group_msg
 | `/reset` | 只重置当前 `session_id`，保留长期记忆 |
 | `/reset session` | 与 `/reset` 相同，语义更明确 |
 | `/reset all` | 重置 session 并清空长期记忆 |
+| `/memory refresh` | 立即压缩当前 Claude session，并刷新长期记忆 |
 | `/memory clear` | 只清空长期记忆，不主动重置当前 session |
 
 ## Claude session 缺失
@@ -272,5 +277,7 @@ Claude runner: persistent
 - `persistent_enabled_chats` 只允许了某些 `chat_id` 或 `session_key`，当前对话不在列表里。
 - 常驻 worker 启动或调用失败，桥自动回退到 `oneshot`。这种情况下桥仍会回复，但日志里会出现 SDK 或 worker 相关错误。
 - 当前 Claude session 上下文过大。常驻能减少进程冷启动，但不能让 6 万 token 的上下文瞬间变小，需要配合 `/rollover`、长期记忆压缩或固定任务快速路径。
+
+可以在飞书里发送 `/runtime` 查看当前 runner、active worker 数量，以及当前 chat 是否已经复用同一个 worker。
 
 建议先只给个人会话或一个测试群开启常驻，确认稳定后再扩大范围。

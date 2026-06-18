@@ -2311,7 +2311,16 @@ class Bridge:
         elif cmd.name == "summary":
             return self._cmd_summary(session_key)
         elif cmd.name == "memory":
-            return self._cmd_memory(session_key, cmd.args)
+            return self._cmd_memory(session_key, cmd.args, effective_rule)
+        elif cmd.name == "soul":
+            return self._cmd_soul(
+                chat_id,
+                cmd.args,
+                effective_rule,
+                can_modify=self._can_modify_chat_rule(effective_rule, sender, chat_type),
+            )
+        elif cmd.name == "runtime":
+            return self._cmd_runtime(session_key)
         elif cmd.name == "ask":
             return self._cmd_ask(chat_id, sender, sender_name, cmd.args, chat_rule)
         elif cmd.name == "status":
@@ -2341,17 +2350,6 @@ class Bridge:
         elif cmd.name == "compact":
             summary = self._maybe_rollover_session(session_key, effective_rule, force=True)
             return "已生成交接摘要并开启新的 Claude session。" if summary else "无法生成交接摘要。"
-        elif cmd.name == "reset":
-            if session_key:
-                self.session_store.clear_session(session_key)
-            return "当前会话已重置。"
-        elif cmd.name == "new":
-            if session_key:
-                self.session_store.update_session_id(session_key, "")
-            return "已开启新会话。"
-        elif cmd.name == "compact":
-            summary = self._maybe_rollover_session(session_key, effective_rule, force=True)
-            return "已生成交接摘要并开启新会话。" if summary else "无法生成交接摘要。"
         elif cmd.name == "workspace":
             return self._cmd_workspace(
                 chat_id, cmd.args, effective_rule,
@@ -2493,7 +2491,12 @@ class Bridge:
 /summary - 查看交接摘要
 /memory - 查看当前对话长期记忆
 /memory history - 查看最近长期记忆历史
+/memory refresh - 立即压缩并刷新当前对话长期记忆
 /memory clear - 清空当前对话长期记忆
+/soul - 查看当前对话角色设定
+/soul set <name|role|tone|business|style> <内容> - 设置当前对话角色
+/soul reset - 重置当前对话角色
+/runtime - 查看当前聊天的 Claude 运行体状态
 /ask <问题> - 单次无历史问答
 /status - 查看当前聊天正在运行的任务
 /queue - 查看当前聊天排队任务数量
@@ -2510,6 +2513,7 @@ class Bridge:
 /workspace set D:/项目目录
 /paths add D:/资料目录, E:/共享目录
 /permission set admin  # 最大权限
+/soul set role 当前群的仓库和物流协作助手
 /rules"""
 
     def _cmd_group_onboarding(self) -> str:
@@ -2527,9 +2531,13 @@ class Bridge:
 设置 Claude Code 权限档位：
 /permission set admin  # 最大权限
 
+设置当前群机器人角色：
+/soul set role 当前群的仓库和物流协作助手
+
 说明：
 - workspace 是 Claude Code 的当前工作目录。
 - allowed_paths 可以有多个，用 /paths add 或 /paths set 管理。
+- soul 是当前群独立的角色设定，只对当前群生效。
 - 群规则只对当前群生效。"""
 
     def _cmd_status(self, chat_id: str) -> str:
@@ -2563,16 +2571,44 @@ class Bridge:
             )
         return "\n".join(lines)
 
+    def _cmd_runtime(self, session_key: str | None) -> str:
+        stats_fn = getattr(self.claude_runner, "stats", None)
+        stats = stats_fn() if stats_fn else {"kind": type(self.claude_runner).__name__}
+        lines = [
+            "Claude 运行体：",
+            f"- runner: {stats.get('kind', type(self.claude_runner).__name__)}",
+            f"- 当前 session_key: {session_key or '(无状态)'}",
+            f"- active_workers: {stats.get('active_workers', 0)}",
+            f"- max_workers: {stats.get('max_workers', 0)}",
+        ]
+        workers = stats.get("workers", []) or []
+        if workers:
+            lines.append("- workers:")
+            for worker in workers[:10]:
+                key = worker.get("key", "")
+                busy = "忙碌" if worker.get("busy") else "空闲"
+                idle = worker.get("idle_seconds", worker.get("age_seconds", 0))
+                startup = "已注入启动上下文" if worker.get("startup_loaded", True) else "未注入启动上下文"
+                marker = " ← 当前" if session_key and key == session_key else ""
+                lines.append(f"  - {key}{marker}: {busy}, idle={idle}s, {startup}")
+        else:
+            lines.append("- workers: (暂无)")
+        return "\n".join(lines)
+
     def _cmd_rules(self, effective_rule) -> str:
         allowed_paths = effective_rule.get("allowed_paths") or []
         allowed_text = "\n".join(f"  - {path}" for path in allowed_paths) if allowed_paths else "  - (未设置)"
         permission_profile = effective_rule.get("permission_profile")
+        soul = effective_rule.get("soul", {}) or {}
+        soul_name = soul.get("name") or "Qiao"
+        soul_role = soul.get("role") or "(默认)"
         return f"""当前规则：
 - session_mode: {effective_rule.get('session_mode')}
 - permission_profile: {self._permission_label(permission_profile)}
 - workspace: {effective_rule.get('workspace') or '(未设置)'}
 - allowed_paths:
 {allowed_text}
+- soul: {soul_name} / {soul_role}
 - custom_prompt: {'(已设置)' if effective_rule.get('custom_prompt') else '(未设置)'}"""
 
     def _cmd_context(self, session_key: str | None) -> str:
@@ -2593,13 +2629,20 @@ class Bridge:
             return "当前没有保存的交接摘要。"
         return f"交接摘要：\n{meta.summary[:500]}..."
 
-    def _cmd_memory(self, session_key: str | None, args: str) -> str:
+    def _cmd_memory(self, session_key: str | None, args: str, effective_rule=None) -> str:
         if not session_key:
             return "当前为无状态模式，无长期记忆。"
         action = (args or "").strip().lower()
         if action == "clear":
             self.session_store.clear_memory(session_key)
             return "已清空当前对话长期记忆。"
+        if action in {"refresh", "compact", "rollover"}:
+            if effective_rule is None:
+                return "无法刷新长期记忆：缺少当前规则。"
+            summary = self._maybe_rollover_session(session_key, effective_rule, force=True)
+            if not summary:
+                return "无法刷新长期记忆。"
+            return "已刷新当前对话长期记忆，并开启新的 Claude session。"
         meta = self.session_store.get(session_key)
         memory = (meta.memory or {}).get("rolling_summary", "")
         if action == "history":
@@ -2616,6 +2659,54 @@ class Bridge:
             return "当前没有长期记忆。"
         version = (meta.memory or {}).get("version", 0)
         return f"长期记忆 v{version}：\n{memory[:1000]}"
+
+    def _cmd_soul(self, chat_id: str, args: str, effective_rule: EffectiveRule, *, can_modify: bool = True) -> str:
+        fields = {
+            "name": "name",
+            "role": "role",
+            "tone": "tone",
+            "business": "business_context",
+            "business_context": "business_context",
+            "style": "output_style",
+            "output_style": "output_style",
+        }
+        current = dict(effective_rule.get("soul", {}) or {})
+        action, _, rest = (args or "").strip().partition(" ")
+        action = action.lower()
+
+        if not action:
+            return "\n".join(
+                [
+                    "当前 soul：",
+                    f"- name: {current.get('name') or 'Qiao'}",
+                    f"- role: {current.get('role') or '当前飞书对话框里的 Claude Code 协作助手'}",
+                    f"- tone: {current.get('tone') or '简洁、可靠、贴近当前对话场景'}",
+                    f"- business_context: {current.get('business_context') or '(未设置)'}",
+                    f"- output_style: {current.get('output_style') or '优先用简体中文，直接给出可执行结论'}",
+                ]
+            )
+
+        if action == "reset":
+            if not can_modify:
+                return "拒绝修改规则：你没有当前聊天的规则管理权限。"
+            self.chat_rules.set(chat_id, soul={})
+            return "已重置当前对话 soul。"
+
+        if action != "set":
+            return "用法: /soul | /soul set <name|role|tone|business|style> <内容> | /soul reset"
+        if not can_modify:
+            return "拒绝修改规则：你没有当前聊天的规则管理权限。"
+
+        field, _, value = rest.strip().partition(" ")
+        field = field.lower()
+        mapped = fields.get(field)
+        value = value.strip()
+        if not mapped or not value:
+            return "用法: /soul set <name|role|tone|business|style> <内容>"
+
+        current[mapped] = value
+        self.chat_rules.set(chat_id, soul=current)
+        return f"已设置当前对话 soul.{mapped}: {value}"
 
     def _cmd_ask(self, chat_id, sender, sender_name, content, chat_rule):
         temporary = {"session_mode": "stateless"}
