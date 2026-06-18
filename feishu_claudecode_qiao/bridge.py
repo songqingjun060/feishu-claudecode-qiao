@@ -1,8 +1,8 @@
 """Bridge: reads Feishu WebSocket events, calls Claude CLI, sends replies.
 
 Design principles:
-- No daemon threads, no queue.Queue
-- Direct processing: message arrives -> process immediately
+- Event ingestion stays responsive while chat workers process messages
+- One serial worker per chat keeps per-chat order
 - Simple startup: python -m feishu_claudecode_qiao
 - Log format matches the legacy version (emoji, separators)
 """
@@ -20,6 +20,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import requests
@@ -41,6 +42,7 @@ from .claude_runner import (
     PersistentClaudeRunner,
 )
 from .media_pipeline import MediaBatcher, MediaItem, RecentContext
+from .event_dispatcher import ChatEventDispatcher
 from .scheduler import ChatScheduler, QueuePolicy
 from .task_router import TaskContext, TaskRouter
 from .tasks.bi_logistics import BiLogisticsRequest, BiLogisticsRunner
@@ -170,11 +172,14 @@ class Bridge:
         self.media_batcher = MediaBatcher(
             window_seconds=config.bridge_media_batch_window_seconds,
         )
+        self.event_dispatcher = ChatEventDispatcher(self._process_event)
         self.recent_context = RecentContext()
         self.claude_runner = self._make_claude_runner()
         self.bridge_logger.info(f"Claude runner: {config.claude_runner or 'oneshot'}")
         self.task_router = TaskRouter()
         self.bi_logistics_runner = BiLogisticsRunner()
+        self._state_lock = RLock()
+        self._token_lock = RLock()
         self._token: str | None = None
         self._token_expires = 0.0
         self._processed_ids: set[str] = set()
@@ -338,12 +343,13 @@ class Bridge:
     ) -> None:
         if not chat_id or not message_id:
             return
-        self._recent_audio_by_chat[chat_id] = {
-            "message_id": message_id,
-            "content_obj": dict(content_obj or {}),
-            "sender": sender,
-            "created_at": time.time(),
-        }
+        with self._state_lock:
+            self._recent_audio_by_chat[chat_id] = {
+                "message_id": message_id,
+                "content_obj": dict(content_obj or {}),
+                "sender": sender,
+                "created_at": time.time(),
+            }
 
     def _cache_recent_file_path(
         self,
@@ -359,21 +365,22 @@ class Bridge:
             return
         now = time.time()
         path_str = str(target)
-        recent = self._recent_files_by_chat.get(chat_id)
-        files: list[str] = []
-        if recent and now - float(recent.get("created_at", 0)) <= 1800:
-            for item in recent.get("files", []) or []:
-                item_path = str(Path(str(item)).expanduser().resolve())
-                if item_path and item_path not in files:
-                    files.append(item_path)
-        files = [item for item in files if item != path_str]
-        files.append(path_str)
-        files = files[-20:]
-        self._recent_files_by_chat[chat_id] = {
-            "files": files,
-            "created_at": now,
-            "uploaded": uploaded,
-        }
+        with self._state_lock:
+            recent = self._recent_files_by_chat.get(chat_id)
+            files: list[str] = []
+            if recent and now - float(recent.get("created_at", 0)) <= 1800:
+                for item in recent.get("files", []) or []:
+                    item_path = str(Path(str(item)).expanduser().resolve())
+                    if item_path and item_path not in files:
+                        files.append(item_path)
+            files = [item for item in files if item != path_str]
+            files.append(path_str)
+            files = files[-20:]
+            self._recent_files_by_chat[chat_id] = {
+                "files": files,
+                "created_at": now,
+                "uploaded": uploaded,
+            }
 
     def _remember_media_item(
         self,
@@ -454,11 +461,12 @@ class Bridge:
         file_path = self._process_file(message_id, content_obj)
         if file_path:
             self._cache_recent_file_path(chat_id, file_path)
-            recent = self._recent_files_by_chat.get(chat_id)
-            if recent is not None:
-                recent["message_id"] = message_id
-                recent["sender"] = sender
-                recent["file_name"] = content_obj.get("file_name", "")
+            with self._state_lock:
+                recent = self._recent_files_by_chat.get(chat_id)
+                if recent is not None:
+                    recent["message_id"] = message_id
+                    recent["sender"] = sender
+                    recent["file_name"] = content_obj.get("file_name", "")
         return file_path or ""
 
     def _cache_recent_files_from_text(
@@ -480,11 +488,12 @@ class Bridge:
             if path_str not in files:
                 files.append(path_str)
         if files:
-            self._recent_files_by_chat[chat_id] = {
-                "files": files,
-                "created_at": time.time(),
-                "uploaded": False,
-            }
+            with self._state_lock:
+                self._recent_files_by_chat[chat_id] = {
+                    "files": files,
+                    "created_at": time.time(),
+                    "uploaded": False,
+                }
 
     def _file_candidates_from_text(
         self,
@@ -637,7 +646,8 @@ class Bridge:
         sender: str = "",
     ) -> str:
         explicit_audio_request = self._wants_recent_audio(content)
-        recent = self._recent_audio_by_chat.get(chat_id)
+        with self._state_lock:
+            recent = self._recent_audio_by_chat.get(chat_id)
         if recent and time.time() - float(recent.get("created_at", 0)) > 600:
             recent = None
         implicit_own_audio_request = self._wants_own_recent_audio(
@@ -960,11 +970,13 @@ class Bridge:
     ) -> str:
         if not self._wants_recent_file_context(content):
             return ""
-        recent = self._recent_files_by_chat.get(chat_id)
+        with self._state_lock:
+            recent = self._recent_files_by_chat.get(chat_id)
         if not recent:
             return ""
         if time.time() - float(recent.get("created_at", 0)) > 1800:
-            self._recent_files_by_chat.pop(chat_id, None)
+            with self._state_lock:
+                self._recent_files_by_chat.pop(chat_id, None)
             return ""
         lines = ["\n\n<bridge_recent_file>"]
         added = False
@@ -981,11 +993,13 @@ class Bridge:
         return "\n".join(lines) if added else ""
 
     def _recent_file_paths(self, chat_id: str, effective_security: SecurityPolicy) -> list[str]:
-        recent = self._recent_files_by_chat.get(chat_id)
+        with self._state_lock:
+            recent = self._recent_files_by_chat.get(chat_id)
         if not recent:
             return []
         if time.time() - float(recent.get("created_at", 0)) > 1800:
-            self._recent_files_by_chat.pop(chat_id, None)
+            with self._state_lock:
+                self._recent_files_by_chat.pop(chat_id, None)
             return []
         paths: list[str] = []
         for candidate in recent.get("files", []) or []:
@@ -1161,9 +1175,10 @@ class Bridge:
             return ""
         path = candidates[0]
         if self._send_local_file(chat_id, path, reply_to_message_id=reply_to_message_id):
-            recent = self._recent_files_by_chat.get(chat_id)
-            if recent and path in [str(item) for item in recent.get("files", [])]:
-                recent["uploaded"] = True
+            with self._state_lock:
+                recent = self._recent_files_by_chat.get(chat_id)
+                if recent and path in [str(item) for item in recent.get("files", [])]:
+                    recent["uploaded"] = True
             return path
         return ""
 
@@ -1178,13 +1193,15 @@ class Bridge:
             return ""
         if not self._is_recent_generated_file_upload_intent(user_content):
             return ""
-        recent = self._recent_files_by_chat.get(chat_id)
+        with self._state_lock:
+            recent = self._recent_files_by_chat.get(chat_id)
         if not recent:
             return ""
         if recent.get("uploaded"):
             return ""
         if time.time() - float(recent.get("created_at", 0)) > 1800:
-            self._recent_files_by_chat.pop(chat_id, None)
+            with self._state_lock:
+                self._recent_files_by_chat.pop(chat_id, None)
             return ""
         files = [str(path) for path in recent.get("files", []) if path]
         for candidate in reversed(files):
@@ -1194,7 +1211,10 @@ class Bridge:
             if not effective_security.explain_path(path).allowed:
                 continue
             if self._send_local_file(chat_id, str(path), reply_to_message_id=reply_to_message_id):
-                recent["uploaded"] = True
+                with self._state_lock:
+                    current = self._recent_files_by_chat.get(chat_id)
+                    if current:
+                        current["uploaded"] = True
                 return str(path)
         return ""
 
@@ -1208,11 +1228,13 @@ class Bridge:
             return ""
         if not self._is_recent_generated_file_upload_intent(user_content):
             return ""
-        recent = self._recent_files_by_chat.get(chat_id)
+        with self._state_lock:
+            recent = self._recent_files_by_chat.get(chat_id)
         if not recent or not recent.get("uploaded"):
             return ""
         if time.time() - float(recent.get("created_at", 0)) > 1800:
-            self._recent_files_by_chat.pop(chat_id, None)
+            with self._state_lock:
+                self._recent_files_by_chat.pop(chat_id, None)
             return ""
         for candidate in reversed([str(path) for path in recent.get("files", []) if path]):
             path = Path(candidate).expanduser().resolve()
@@ -1422,7 +1444,7 @@ class Bridge:
                                         continue
                                     if msg_id:
                                         self._processed_ids.add(msg_id)
-                                    self._process_event(event)
+                                    self._dispatch_event(event)
                                 except json.JSONDecodeError:
                                     self.bridge_logger.debug(
                                         f"Skip invalid JSON line: {line[:80]}"
@@ -1432,6 +1454,7 @@ class Bridge:
         except KeyboardInterrupt:
             self.bridge_logger.info("Stopping...")
         finally:
+            self.event_dispatcher.stop(timeout=10)
             self._save_sessions()
             close_runner = getattr(self.claude_runner, "close_all", None)
             if close_runner:
@@ -1444,6 +1467,9 @@ class Bridge:
         if not self.ws_events_file.exists():
             return 0
         return self.ws_events_file.stat().st_size
+
+    def _dispatch_event(self, event: dict[str, Any]) -> None:
+        self.event_dispatcher.dispatch(event)
 
     # ------------------------------------------------------------------
     # Event processing
@@ -3007,29 +3033,30 @@ Rules:
 
     def _get_token(self) -> str:
         """Get Feishu tenant_access_token with caching."""
-        if self._token and time.time() < self._token_expires - 60:
+        with self._token_lock:
+            if self._token and time.time() < self._token_expires - 60:
+                return self._token
+
+            url = (
+                f"{self.config.feishu_domain}"
+                f"/open-apis/auth/v3/tenant_access_token/internal"
+            )
+            resp = requests.post(
+                url,
+                json={
+                    "app_id": self.config.feishu_app_id,
+                    "app_secret": self.config.feishu_app_secret,
+                },
+                timeout=30,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                raise RuntimeError(f"Token failed: {data}")
+
+            self._token = data["tenant_access_token"]
+            self._token_expires = time.time() + data.get("expire", 7200)
+            self.bridge_logger.info("Feishu token refreshed")
             return self._token
-
-        url = (
-            f"{self.config.feishu_domain}"
-            f"/open-apis/auth/v3/tenant_access_token/internal"
-        )
-        resp = requests.post(
-            url,
-            json={
-                "app_id": self.config.feishu_app_id,
-                "app_secret": self.config.feishu_app_secret,
-            },
-            timeout=30,
-        )
-        data = resp.json()
-        if data.get("code") != 0:
-            raise RuntimeError(f"Token failed: {data}")
-
-        self._token = data["tenant_access_token"]
-        self._token_expires = time.time() + data.get("expire", 7200)
-        self.bridge_logger.info("Feishu token refreshed")
-        return self._token
 
     def _prepare_message_content(self, content: str, msg_type: str) -> str:
         if msg_type != "text":
