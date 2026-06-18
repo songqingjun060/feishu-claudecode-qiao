@@ -43,6 +43,26 @@ def test_maybe_rollover_force_triggers_call(tmp_path, monkeypatch):
     assert "summary text" in result
 
 
+def test_rollover_does_not_store_claude_error_as_memory(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sess_old")
+    bridge.session_store.record_turn("chat:c1", 10, 20)
+
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, sid, **kwargs: ("[错误: 无法调用Claude CLI: [Errno 22] Invalid argument]", None),
+    )
+
+    result = bridge._maybe_rollover_session("chat:c1", resolve_rule({}), force=True)
+    meta = bridge.session_store.get("chat:c1")
+
+    assert result == ""
+    assert meta.session_id == "sess_old"
+    assert meta.memory["rolling_summary"] == ""
+    assert meta.rollover_count == 0
+
+
 def test_rollover_current_message_uses_new_session_and_carries_summary(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     bridge.session_store.update_session_id("chat:c1", "old_sid")
@@ -217,6 +237,7 @@ def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monke
     assert "memory_context_chars" in decision
     assert decision["resumed"] is False
     assert "Claude runtime: key=chat:oc_1" in caplog.text
+    assert bridge.session_store.get("chat:oc_1").force_rollover_next is False
 
 
 def test_call_claude_with_recovery_retries_transient_500(tmp_path, monkeypatch):

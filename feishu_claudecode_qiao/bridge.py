@@ -48,7 +48,7 @@ from .scheduler import ChatScheduler, QueuePolicy
 from .task_router import TaskContext, TaskRouter
 from .tasks.bi_logistics import BiLogisticsRequest, BiLogisticsRunner
 from .timing import RunTiming
-from .session_strategy import choose_session_strategy, should_force_rollover_after_timing
+from .session_strategy import choose_session_strategy
 
 _WORK_DIR = Path(__file__).parent.parent.resolve()
 _PROCESSING_REACTION_EMOJI = "OK"
@@ -2161,11 +2161,6 @@ class Bridge:
                 self.session_store.record_turn(session_key, len(prompt), len(reply), attachment_task=bool(img_path or msg_type in ("audio", "file")))
 
             claude_ms = timing.stage_ms().get("prompt_built_to_claude_completed", 0)
-            if session_key and should_force_rollover_after_timing(
-                prompt_built_to_claude_completed_ms=claude_ms,
-                threshold_ms=int((effective_rule.get("context_policy", {}) or {}).get("slow_response_ms", 30000)),
-            ):
-                self.session_store.set_force_rollover_next(session_key, True)
             runtime_reused = bool(self._last_claude_run_meta.get("reused_worker"))
             startup_injected = bool(self._last_claude_run_meta.get("startup_injected"))
             self.bridge_logger.info(
@@ -2758,6 +2753,9 @@ class Bridge:
 摘要应该简洁但信息丰富，帮助新会话快速恢复上下文。"""
         effective_workspace = effective_rule.get("workspace") or self.config.claude_work_dir
         summary, _ = self._call_claude(summary_prompt, old_session_id, cwd=effective_workspace)
+        if self._is_claude_error_reply(summary):
+            self.bridge_logger.warning("Skip rollover because summary generation failed")
+            return ""
 
         memory_summary = self._update_chat_memory(session_key, summary, effective_rule, effective_workspace)
 
@@ -2805,6 +2803,9 @@ class Bridge:
 {current_summary}
 </current_session_summary>"""
         updated, _ = self._call_claude(prompt, None, cwd=effective_workspace)
+        if self._is_claude_error_reply(updated):
+            self.bridge_logger.warning("Keep previous chat memory because memory update failed")
+            return previous_memory or current_summary
         return (updated or current_summary)[:max_chars]
 
     def _memory_context_for_prompt(self, session_key: str | None, effective_rule) -> str:
@@ -3044,6 +3045,20 @@ Rules:
             "api error: 500" in text
             or "500 internal server error" in text
             or "internal server error" in text
+        )
+
+    def _is_claude_error_reply(self, reply: str) -> bool:
+        text = (reply or "").strip()
+        if not text:
+            return True
+        lowered = text.lower()
+        return (
+            text.startswith("[错误:")
+            or text.startswith("[Error:")
+            or "无法调用claude cli" in lowered
+            or "api error:" in lowered
+            or "internal server error" in lowered
+            or "context length exceeded" in lowered
         )
 
     def _build_claude_popen_args(self, args: list[str]) -> tuple[list[str] | str, bool]:
