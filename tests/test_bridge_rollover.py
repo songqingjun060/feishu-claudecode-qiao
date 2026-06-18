@@ -179,8 +179,9 @@ def test_short_text_on_heavy_session_uses_light_session_without_overwriting_work
     assert bridge.session_store.get("chat:oc_1").session_id == "work_sid"
 
 
-def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monkeypatch):
+def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monkeypatch, caplog):
     import json
+    import logging
 
     bridge = make_bridge(tmp_path)
     bridge.session_store.update_session_id("chat:oc_1", "work_sid")
@@ -203,6 +204,7 @@ def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monke
         }
     }
 
+    caplog.set_level(logging.INFO, logger="feishu_qiao.bridge")
     bridge._process_event_body(event)
 
     records = [
@@ -214,6 +216,7 @@ def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monke
     assert decision["prompt_chars"] > 0
     assert "memory_context_chars" in decision
     assert decision["resumed"] is False
+    assert "Claude runtime: key=chat:oc_1" in caplog.text
 
 
 def test_call_claude_with_recovery_retries_transient_500(tmp_path, monkeypatch):

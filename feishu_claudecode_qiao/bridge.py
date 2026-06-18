@@ -2166,6 +2166,16 @@ class Bridge:
                 threshold_ms=int((effective_rule.get("context_policy", {}) or {}).get("slow_response_ms", 30000)),
             ):
                 self.session_store.set_force_rollover_next(session_key, True)
+            runtime_reused = bool(self._last_claude_run_meta.get("reused_worker"))
+            startup_injected = bool(self._last_claude_run_meta.get("startup_injected"))
+            self.bridge_logger.info(
+                "Claude runtime: key=%s strategy=%s claude_ms=%s reused=%s startup_injected=%s",
+                session_key or "",
+                session_decision.strategy,
+                claude_ms,
+                runtime_reused,
+                startup_injected,
+            )
             self.audit.write(
                 "context_decision",
                 chat_id=chat_id,
@@ -2178,8 +2188,8 @@ class Bridge:
                 resumed=bool(session_id),
                 claude_ms=claude_ms,
                 runtime_key=session_key or "",
-                runtime_reused=bool(self._last_claude_run_meta.get("reused_worker")),
-                startup_injected=bool(self._last_claude_run_meta.get("startup_injected")),
+                runtime_reused=runtime_reused,
+                startup_injected=startup_injected,
             )
 
             self._cache_recent_files_from_text(chat_id, reply, effective_security)
