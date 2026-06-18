@@ -177,7 +177,7 @@ class Bridge:
             self._process_event,
             coalesce=self._coalesce_chat_events,
             before_process=self._preprocess_coalesced_event,
-            coalesce_window_seconds=config.bridge_message_coalesce_window_seconds,
+            coalesce_window_seconds=self._coalesce_window_for_event,
         )
         self.recent_context = RecentContext()
         self.claude_runner = self._make_claude_runner()
@@ -1647,6 +1647,9 @@ class Bridge:
         content_raw = message.get("content", "")
         timing = RunTiming(f"run_{msg_id or int(time.time() * 1000)}")
         timing.mark("received")
+        coalesce_wait_ms = int(event.pop("_bridge_coalesce_wait_ms", 0) or 0)
+        if coalesce_wait_ms > 0:
+            timing.add_elapsed_mark("coalesced", coalesce_wait_ms)
         timing_written = False
         content_obj: Any = {}
         try:
@@ -2174,6 +2177,7 @@ class Bridge:
             self.audit.write(
                 "context_decision",
                 chat_id=chat_id,
+                message_id=msg_id,
                 sender=sender,
                 session_key=session_key or "",
                 strategy=session_decision.strategy,
@@ -2594,8 +2598,10 @@ class Bridge:
                 busy = "忙碌" if worker.get("busy") else "空闲"
                 idle = worker.get("idle_seconds", worker.get("age_seconds", 0))
                 startup = "已注入启动上下文" if worker.get("startup_loaded", True) else "未注入启动上下文"
+                startup_hash = worker.get("startup_hash", "")
+                hash_text = f", startup_hash={startup_hash}" if startup_hash else ""
                 marker = " ← 当前" if session_key and key == session_key else ""
-                lines.append(f"  - {key}{marker}: {busy}, idle={idle}s, {startup}")
+                lines.append(f"  - {key}{marker}: {busy}, idle={idle}s, {startup}{hash_text}")
         else:
             lines.append("- workers: (暂无)")
         return "\n".join(lines)
@@ -2962,6 +2968,21 @@ Rules:
                 f"消息: {content}",
             ]
         )
+
+    def _coalesce_window_for_event(self, event: dict[str, Any]) -> float:
+        message = self._event_message(event)
+        msg_type = message.get("message_type", "text")
+        if msg_type == "text":
+            return float(getattr(self.config, "bridge_text_coalesce_window_seconds", 2) or 0)
+        return float(
+            getattr(
+                self.config,
+                "bridge_message_coalesce_window_seconds",
+                self.config.bridge_media_batch_window_seconds,
+            )
+            or 0
+        )
+
     # ------------------------------------------------------------------
     # Claude CLI
     # ------------------------------------------------------------------
@@ -3094,7 +3115,11 @@ Rules:
 
         def emit_console(text: str, *, end: str = "\n") -> None:
             if self.config.bridge_console_claude_stream:
-                print(text, end=end, flush=True)
+                try:
+                    print(text, end=end, flush=True)
+                except OSError as exc:
+                    self.bridge_logger.warning(f"Console stream disabled after output error: {exc}")
+                    object.__setattr__(self.config, "bridge_console_claude_stream", False)
 
         def handle_line(line: str) -> None:
             nonlocal final_text, new_session_id, result_text

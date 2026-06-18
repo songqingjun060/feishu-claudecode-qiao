@@ -8,6 +8,7 @@ def make_bridge(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
     ))
 
 
@@ -30,6 +31,7 @@ def test_build_prompt_includes_security_boundary_with_allowed_paths(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
         claude_work_dir="D:/default-work",
         security_allowed_paths=["D:/shared"],
     ))
@@ -54,6 +56,7 @@ def test_build_prompt_uses_default_workspace_in_security_boundary(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
         claude_work_dir="D:/default-work",
     ))
     rule = resolve_rule({})

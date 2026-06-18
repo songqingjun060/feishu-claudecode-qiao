@@ -9,6 +9,7 @@ def make_bridge(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
         claude_work_dir=str(tmp_path),
     ))
 
@@ -195,7 +196,16 @@ def test_runtime_command_reports_runner_stats(tmp_path):
                 "kind": "persistent",
                 "active_workers": 1,
                 "max_workers": 3,
-                "workers": [{"key": "chat:c1", "busy": False, "age_seconds": 2, "idle_seconds": 1}],
+                "workers": [
+                    {
+                        "key": "chat:c1",
+                        "busy": False,
+                        "age_seconds": 2,
+                        "idle_seconds": 1,
+                        "startup_loaded": True,
+                        "startup_hash": "abc123def456",
+                    }
+                ],
             }
 
     bridge.claude_runner = RunnerWithStats()
@@ -213,6 +223,7 @@ def test_runtime_command_reports_runner_stats(tmp_path):
 
     assert "persistent" in reply
     assert "chat:c1" in reply
+    assert "startup_hash=abc123def456" in reply
 
 
 def test_reset_session_keeps_memory(tmp_path):
@@ -402,6 +413,7 @@ def test_group_bot_admin_can_set_workspace(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
         bridge_bot_admins=["u1"],
     ))
     from feishu_claudecode_qiao.rule_engine import resolve_rule
@@ -414,6 +426,7 @@ def test_group_bot_owner_can_manage_when_admins_not_configured(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
         bridge_bot_owner_id="owner_1",
     ))
     from feishu_claudecode_qiao.rule_engine import resolve_rule

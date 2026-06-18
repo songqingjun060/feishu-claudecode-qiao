@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 CoalescedEvents = dict[str, Any] | list[dict[str, Any]]
 CoalesceFn = Callable[[list[dict[str, Any]]], CoalescedEvents]
+CoalesceWindow = float | Callable[[dict[str, Any]], float]
 
 
 class ChatEventDispatcher:
@@ -19,15 +20,16 @@ class ChatEventDispatcher:
         *,
         coalesce: CoalesceFn | None = None,
         before_process: Callable[[dict[str, Any]], None] | None = None,
-        coalesce_window_seconds: float = 0.0,
+        coalesce_window_seconds: CoalesceWindow = 0.0,
     ) -> None:
         self.process = process
         self.coalesce = coalesce
         self.before_process = before_process
-        self.coalesce_window_seconds = max(0.0, float(coalesce_window_seconds))
+        self.coalesce_window_seconds = coalesce_window_seconds
         self._queues: dict[str, Queue[dict[str, Any] | None]] = {}
         self._threads: dict[str, Thread] = {}
         self._last_used: dict[str, float] = {}
+        self._last_coalesce_wait_ms: dict[str, float] = {}
         self._lock = Lock()
         self._stopping = False
 
@@ -81,6 +83,10 @@ class ChatEventDispatcher:
                 "queued": sum(queue.qsize() for queue in self._queues.values()),
             }
 
+    def last_coalesce_wait_ms(self, chat_id: str) -> float | None:
+        with self._lock:
+            return self._last_coalesce_wait_ms.get(chat_id)
+
     def _worker(self, chat_id: str, queue: Queue[dict[str, Any] | None]) -> None:
         while True:
             task_count = 1
@@ -92,8 +98,17 @@ class ChatEventDispatcher:
                 if event is None:
                     return
                 events = [event]
-                if self.coalesce and self.coalesce_window_seconds > 0:
-                    events.extend(self._drain_coalesce_window(queue))
+                if self.coalesce and (
+                    coalesce_window_seconds := self._coalesce_window_seconds(event)
+                ) > 0:
+                    drained, wait_ms = self._drain_coalesce_window(
+                        queue,
+                        coalesce_window_seconds,
+                    )
+                    events.extend(drained)
+                    self._set_last_coalesce_wait_ms(chat_id, wait_ms)
+                    for item in events:
+                        item["_bridge_coalesce_wait_ms"] = int(wait_ms)
                     task_count = len(events)
                     coalesced = self.coalesce(events)
                 else:
@@ -115,21 +130,33 @@ class ChatEventDispatcher:
     def _drain_coalesce_window(
         self,
         queue: Queue[dict[str, Any] | None],
-    ) -> list[dict[str, Any]]:
-        deadline = time() + self.coalesce_window_seconds
+        coalesce_window_seconds: float,
+    ) -> tuple[list[dict[str, Any]], float]:
+        start = time()
+        deadline = start + coalesce_window_seconds
         events: list[dict[str, Any]] = []
         while True:
             remaining = deadline - time()
             if remaining <= 0:
-                return events
+                return events, (time() - start) * 1000
             try:
                 event = queue.get(timeout=remaining)
             except Empty:
-                return events
+                return events, (time() - start) * 1000
             if event is None:
                 queue.put(None)
-                return events
+                return events, (time() - start) * 1000
             events.append(event)
+
+    def _coalesce_window_seconds(self, event: dict[str, Any]) -> float:
+        window = self.coalesce_window_seconds
+        if callable(window):
+            window = window(event)
+        return max(0.0, float(window))
+
+    def _set_last_coalesce_wait_ms(self, chat_id: str, wait_ms: float) -> None:
+        with self._lock:
+            self._last_coalesce_wait_ms[chat_id] = wait_ms
 
     def _chat_id(self, event: dict[str, Any]) -> str:
         message = event.get("event", {}).get("message", {})

@@ -10,7 +10,7 @@ command = "claude"
 work_dir = "."
 permission_mode = "safe"
 # oneshot：每条消息调用一次 Claude CLI，最稳定。
-# persistent：使用 claude-agent-sdk 为对话保留常驻 Claude worker，缺少 SDK 或 worker 出错时自动回退 oneshot。
+# persistent：SDK-backed 实验加速，为对话保留常驻 Claude worker；缺少 SDK 或 worker 出错时自动回退 oneshot。
 runner = "oneshot"
 worker_idle_ttl_seconds = 900
 max_workers = 3
@@ -19,7 +19,8 @@ persistent_enabled_chats = []
 
 [whisper]
 model = "base"
-load_policy = "lazy"  # preload / lazy / per_call
+# 默认在桥启动时预加载 Whisper，第一条语音不再承担模型冷启动。
+load_policy = "preload"  # preload / lazy / per_call
 
 [bridge]
 data_dir = "./data"
@@ -35,8 +36,9 @@ console_message_log = true
 console_claude_stream = true
 queue_notice_after_seconds = 8
 media_batch_window_seconds = 10
-# 同一聊天窗口内的连续文本消息会先等这个窗口再合并成一次 Claude 调用。
-# 设为 0 可关闭合并；图片/文件/语音不会被吞并，会继续按顺序处理并进入上下文。
+# 普通文本连续发送时使用较短合并窗口，降低简单问答等待。
+text_coalesce_window_seconds = 2
+# 图片、文件、语音等媒体上下文保留较长窗口，便于批处理。
 message_coalesce_window_seconds = 10
 progress_cards = false
 fast_tasks_enabled = true

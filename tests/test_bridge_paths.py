@@ -33,6 +33,7 @@ def test_websocket_watchdog_starts_subscriber_when_pid_missing(tmp_path, monkeyp
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             bridge_ws_profile="qiao-test",
         ),
         config_path=config_path,
@@ -68,6 +69,7 @@ def test_websocket_watchdog_exits_after_repeated_restart_failures(tmp_path, monk
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             bridge_ws_profile="qiao-test",
             bridge_ws_max_restart_failures=2,
         ),
@@ -96,6 +98,7 @@ def test_stop_managed_websocket_calls_start_ws_stop(tmp_path, monkeypatch):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             bridge_ws_profile="qiao-test",
         ),
         config_path=config_path,
@@ -144,6 +147,7 @@ def test_websocket_watchdog_does_not_start_when_pid_running(tmp_path, monkeypatc
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             bridge_ws_profile="qiao-test",
         ),
         config_path=config_path,
@@ -176,6 +180,7 @@ def test_security_for_rule_uses_rule_workspace(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
     ))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -205,6 +210,7 @@ def test_process_event_rejects_disallowed_path_before_claude(tmp_path, monkeypat
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
     ))
     sent = []
     called = []
@@ -224,6 +230,7 @@ def test_normalize_compact_lark_event_restores_nested_shape(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
     ))
 
     event = bridge._normalize_event({
@@ -250,6 +257,7 @@ def test_normalize_raw_lark_event_preserves_audio_file_key(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
     ))
 
     raw = {
@@ -279,6 +287,7 @@ def test_normalize_compact_file_event_parses_xml_file_metadata(tmp_path):
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(tmp_path),
+        whisper_load_policy="lazy",
     ))
 
     event = bridge._normalize_event({

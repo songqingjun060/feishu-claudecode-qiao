@@ -19,7 +19,7 @@ DEFAULT_RULE = {
         "role": "当前飞书对话框里的 Claude Code 协作助手",
         "tone": "简洁、可靠、贴近当前对话场景",
         "business_context": "",
-        "output_style": "优先用简体中文，直接给出可执行结论",
+        "output_style": "优先使用简体中文，直接给出可执行结论",
     },
     "members": {},
     "rule_admins": [],
@@ -116,9 +116,9 @@ def validate_rule(rule: dict[str, Any]) -> list[str]:
 def build_session_key(chat_id: str, sender_id: str, session_mode: str) -> str | None:
     if session_mode == "shared_chat":
         return f"chat:{chat_id}"
-    elif session_mode == "per_user":
+    if session_mode == "per_user":
         return f"chat:{chat_id}:user:{sender_id}"
-    elif session_mode == "stateless":
+    if session_mode == "stateless":
         return None
     return f"chat:{chat_id}"
 

@@ -53,6 +53,7 @@ def test_bridge_run_claude_respects_late_monkeypatch_of_call_claude(tmp_path, mo
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
         )
     )
     calls = []
@@ -236,6 +237,7 @@ def test_bridge_uses_persistent_runner_when_configured(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             claude_runner="persistent",
         )
     )
@@ -249,6 +251,7 @@ def test_bridge_limits_persistent_runner_to_enabled_chats(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             claude_runner="persistent",
             claude_persistent_enabled_chats=["chat:allowed"],
         )
@@ -265,6 +268,7 @@ def test_bridge_reuses_persistent_chat_worker_even_without_session_id(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
         )
     )
     requests = []

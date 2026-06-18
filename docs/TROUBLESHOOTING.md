@@ -107,12 +107,12 @@ im:message.group_msg
 
 缺少这个权限时，桥仍可处理飞书直接推送到桥的媒体事件，但无法主动回查群里的上一条音频或文件。
 
-语音转写默认使用 `whisper.load_policy = "lazy"`：第一次使用时加载并缓存，后续语音复用同一个 Whisper 模型。转写时默认指定中文识别，减少繁体或语言漂移。如果第一次语音慢、后续明显变快，这是正常现象。
+语音转写默认使用 `whisper.load_policy = "preload"`：桥启动时加载并缓存 Whisper 模型，第一条语音不再承担模型冷启动。转写时默认指定中文识别，减少繁体或语言漂移。如果启动变慢但后续语音稳定，这是正常现象。
 
 可选策略：
 
-- `preload`：桥启动时加载并常驻，第一条语音更快。
-- `lazy`：第一次语音时加载并常驻，默认推荐。
+- `preload`：桥启动时加载并常驻，默认推荐，第一条语音更快。
+- `lazy`：第一次语音时加载并常驻，启动更快但第一条语音会慢。
 - `per_call`：每条语音临时加载，用完释放，适合很少使用语音且希望平时不占内存的场景。
 
 ## 文件上传失败
@@ -154,7 +154,7 @@ im:message.group_msg
 
 默认策略会尽量延续当前 Claude session，并在 session 异常或上下文超限时携带长期记忆开启新 session。长期记忆保存在 `data/sessions.json` 的会话记录中，重启桥后仍可加载。
 
-当前稳定 runner 是 `claude.runner = "oneshot"`：桥会保留 `session_id`，但每条消息仍会新启动一次 Claude CLI。`persistent` 和 `tmux` 是后续实验模式，启用前应先确认测试和回退策略。
+当前稳定 runner 是 `claude.runner = "oneshot"`：桥会保留 `session_id`，但每条消息仍会新启动一次 Claude CLI。`persistent` 是基于可选 `claude-agent-sdk` 的实验加速模式，缺少 SDK、worker 启动失败或常驻调用异常时会回退 `oneshot`；启用前应先确认测试和回退策略。
 
 如果要判断慢在哪里，优先查看 `data/logs/audit.jsonl` 中的 `message_timing`：
 
@@ -162,6 +162,8 @@ im:message.group_msg
 - `prompt_built_to_claude_completed` 偏大：Claude CLI 启动、session 恢复、模型推理或工具调用慢。
 - `claude_completed_to_file_sent` 偏大：本地文件上传到飞书或发送消息慢。
 - `media_start_to_media_cached` 偏大：图片、语音或文件下载/转写慢。
+
+`context_decision`、`message_timing`、`message_coalesced` 等审计记录会带上 `message_id`，方便和飞书原消息对齐。单次 Claude 慢响应只记录耗时，不会自动标记下一轮翻页；只有显式会话策略、上下文真实超限、session 异常或 `/rollover` 命令才会触发翻页。
 
 可用命令：
 
@@ -253,7 +255,7 @@ data/logs/messages.log
 ```text
 data/logs/bridge.log       服务、token、API、Claude、媒体处理
 data/logs/messages.log     收发消息流程
-data/logs/audit.jsonl      安全决策和回复事件
+data/logs/audit.jsonl      安全决策、message_id、会话策略、合并和回复事件
 ```
 
 不要公开分享日志；日志可能包含聊天内容、本地路径和敏感配置线索。
@@ -276,6 +278,7 @@ Claude runner: persistent
 - 没有安装可选依赖：`python -m pip install -e ".[persistent]"`
 - `persistent_enabled_chats` 只允许了某些 `chat_id` 或 `session_key`，当前对话不在列表里。
 - 常驻 worker 启动或调用失败，桥自动回退到 `oneshot`。这种情况下桥仍会回复，但日志里会出现 SDK 或 worker 相关错误。
+- startup prompt hash 没有变化时，常驻 worker 会复用已注入的角色、规则和长期记忆启动上下文；这属于正常加速行为，不代表规则没有加载。
 - 当前 Claude session 上下文过大。常驻能减少进程冷启动，但不能让 6 万 token 的上下文瞬间变小，需要配合 `/rollover`、长期记忆压缩或固定任务快速路径。
 
 可以在飞书里发送 `/runtime` 查看当前 runner、active worker 数量，以及当前 chat 是否已经复用同一个 worker。

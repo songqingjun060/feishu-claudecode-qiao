@@ -25,7 +25,12 @@ except Exception:
     load_config = None  # type: ignore[assignment]
 
 
-EVENT_TYPES = "im.message.receive_v1,im.message.recalled_v1"
+EVENT_TYPES = (
+    "im.message.receive_v1,"
+    "im.message.recalled_v1,"
+    "im.message.reaction.created_v1,"
+    "im.message.reaction.deleted_v1"
+)
 
 
 def _config_data_dir(config_path: str | Path) -> Path:

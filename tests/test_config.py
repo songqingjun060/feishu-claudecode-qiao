@@ -13,7 +13,7 @@ def test_config_defaults():
     assert config.feishu_event_backend == "start_ws"
     assert config.bridge_console_message_log is True
     assert config.bridge_console_claude_stream is True
-    assert config.whisper_load_policy == "lazy"
+    assert config.whisper_load_policy == "preload"
 
 
 def test_config_from_env(monkeypatch):
@@ -62,6 +62,7 @@ persistent_enabled_chats = ["oc_1", "oc_2"]
 [bridge]
 queue_notice_after_seconds = 6
 media_batch_window_seconds = 4
+text_coalesce_window_seconds = 1
 progress_cards = true
 fast_tasks_enabled = false
 """.strip(),
@@ -76,5 +77,6 @@ fast_tasks_enabled = false
     assert config.claude_persistent_enabled_chats == ["oc_1", "oc_2"]
     assert config.bridge_queue_notice_after_seconds == 6
     assert config.bridge_media_batch_window_seconds == 4
+    assert config.bridge_text_coalesce_window_seconds == 1
     assert config.bridge_progress_cards is True
     assert config.bridge_fast_tasks_enabled is False

@@ -52,7 +52,9 @@ def test_initial_event_offset_starts_at_end_of_existing_file(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             bridge_message_coalesce_window_seconds=0,
+            bridge_text_coalesce_window_seconds=0,
         )
     )
     bridge.ws_events_file.parent.mkdir(parents=True, exist_ok=True)
@@ -67,7 +69,9 @@ def test_initial_event_offset_is_zero_when_file_missing(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             bridge_message_coalesce_window_seconds=0,
+            bridge_text_coalesce_window_seconds=0,
         )
     )
 
@@ -80,7 +84,9 @@ def test_bridge_event_dispatch_queues_without_processing_inline(tmp_path, monkey
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
             bridge_message_coalesce_window_seconds=0,
+            bridge_text_coalesce_window_seconds=0,
         )
     )
     queued = []
@@ -106,6 +112,7 @@ def test_bridge_coalesces_same_sender_text_events(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
         )
     )
 
@@ -129,6 +136,7 @@ def test_bridge_coalesces_mixed_media_into_last_text_with_context(tmp_path, monk
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
         )
     )
     cached = tmp_path / "codes.xlsx"

@@ -19,9 +19,14 @@
 - 飞书图片可以下载到本地，并把本地路径交给 Claude Code。
 - 连续发送的多张裸图片会先缓存，后续任务文本会一次性带入最近图片上下文。
 - 前台窗口可以看到消息收发、Claude 流式输出和发送结果。
-- 语音转写模型支持启动预热、首次使用后常驻、每次临时加载三种策略，并按中文识别。
+- 语音转写模型默认在桥启动时预热，也支持首次使用后常驻、每次临时加载三种策略，并按中文识别。
+- 同一聊天窗口内的连续短文本可在配置窗口内合并成一次 Claude 调用，并在 audit 中记录 `message_coalesced`。
+- `context_decision` 和 `message_timing` 等审计记录包含 `message_id`，便于对齐飞书原消息。
+- 常驻 Claude worker 会记录 startup prompt hash，角色、规则和长期记忆启动上下文未变化时不重复注入。
+- reaction created/deleted 事件已订阅并静默处理，用于降低临时响应标记产生的日志噪声。
 - 桥重启会从事件文件当前末尾开始读取，不会重放旧消息。
 - 失效的 Claude session id 会被清理并重试一次。
+- 单次 Claude 慢响应只记录 audit，不会自动标记下一轮翻页；翻页需要显式策略、上下文超限、session 异常或 `/rollover`。
 - 桥和 WebSocket 订阅按同一个配置和 profile 绑定；桥停止或重启会同步处理对应 WebSocket。
 - `doctor` 可以提示当前飞书 API 后端和事件后端是否仍是稳定链路。
 

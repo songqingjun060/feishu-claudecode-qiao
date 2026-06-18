@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -42,7 +41,6 @@ def extract_path_candidates(content: str) -> list[str]:
 class SecurityPolicy:
     """Manages security boundaries: permission mode, file access, message filtering."""
 
-    # System-sensitive paths that should never be accessed
     _BLOCKED_PATH_PATTERNS = [
         r"^[A-Za-z]:[/\\]Windows",
         r"^[A-Za-z]:[/\\]Program Files",
@@ -74,10 +72,11 @@ class SecurityPolicy:
         self.data_dir = Path(data_dir).resolve()
         self.allowed_paths = [Path(p).resolve() for p in (allowed_paths or [])]
         self.blocked_keywords = [kw.strip().lower() for kw in (blocked_keywords or []) if kw.strip()]
-        self._blocked_pattern = re.compile(
-            "|".join(re.escape(kw) for kw in self.blocked_keywords),
-            re.IGNORECASE,
-        ) if self.blocked_keywords else None
+        self._blocked_pattern = (
+            re.compile("|".join(re.escape(kw) for kw in self.blocked_keywords), re.IGNORECASE)
+            if self.blocked_keywords
+            else None
+        )
 
     def get_claude_permission_args(self) -> list[str]:
         """Return CLI args for Claude permission mode."""
@@ -95,31 +94,7 @@ class SecurityPolicy:
         return ""
 
     def is_path_allowed(self, path: str | Path) -> bool:
-        """Check if a file path is within allowed directories."""
-        raw_path = str(path)
-        if self._blocked_path_match(raw_path):
-            return False
-
-        try:
-            target = Path(path).resolve()
-        except (OSError, ValueError):
-            return False
-
-        # Check blocked patterns
-        path_str = str(target)
-        if self._blocked_path_match(path_str):
-            return False
-
-        # Check if within default allowed dirs
-        allowed_dirs = [self.work_dir, self.data_dir] + self.allowed_paths
-        for allowed in allowed_dirs:
-            try:
-                target.relative_to(allowed)
-                return True
-            except ValueError:
-                continue
-
-        return False
+        return self.explain_path(path).allowed
 
     def explain_path(self, path: str | Path) -> PathCheckResult:
         """Explain why a path is allowed or blocked."""
@@ -137,10 +112,7 @@ class SecurityPolicy:
         except (OSError, ValueError) as e:
             return PathCheckResult(allowed=False, reason=f"Invalid path: {e}")
 
-        path_str = str(target)
-
-        # Check blocked patterns
-        resolved_pattern = self._blocked_path_match(path_str)
+        resolved_pattern = self._blocked_path_match(str(target))
         if resolved_pattern:
             return PathCheckResult(
                 allowed=False,
@@ -148,7 +120,6 @@ class SecurityPolicy:
                 matched_pattern=resolved_pattern,
             )
 
-        # Check if within default allowed dirs
         allowed_dirs = [self.work_dir, self.data_dir] + self.allowed_paths
         for allowed in allowed_dirs:
             try:
@@ -167,21 +138,15 @@ class SecurityPolicy:
         )
 
     def check_message(self, content: str) -> tuple[bool, str]:
-        """Check message for blocked keywords.
-
-        Returns:
-            (is_blocked, warning_message)
-            If not blocked, warning_message is empty.
-        """
+        """Check message for blocked keywords."""
         if not self.blocked_keywords or not self._blocked_pattern:
             return False, ""
 
         if self._blocked_pattern.search(content):
             keywords = ", ".join(self.blocked_keywords)
             return True, (
-                f"⚠️ 消息已被拦截："
-                f"检测到敏感关键词 ({keywords})。"
-                f"请避免在群聊中发送包含这些内容的消息。"
+                f"消息已被拦截：检测到敏感关键词（{keywords}）。"
+                "请避免在群聊中发送包含这些内容的消息。"
             )
 
         return False, ""
@@ -194,7 +159,7 @@ class SecurityPolicy:
             ("move", ["移动", "move ", "mv "]),
             ("overwrite", ["覆盖", "overwrite", "> "]),
             ("read_sensitive", [".ssh", ".aws", ".kube", "id_rsa", "password", "secret", "token"]),
-            ("shell", ["powershell", "cmd.exe", "bash", "sudo", "curl |", "invoke-expression"]),
+            ("shell", ["powershell", "cmd.exe", "bash", "sudo", "curl |", "invoke-expression", "执行"]),
         ]
         for category, needles in patterns:
             for needle in needles:

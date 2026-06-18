@@ -11,6 +11,7 @@ def make_bridge(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path / "data"),
+            whisper_load_policy="lazy",
             claude_work_dir=str(tmp_path),
             security_allowed_paths=[str(tmp_path)],
             bridge_fast_tasks_enabled=False,

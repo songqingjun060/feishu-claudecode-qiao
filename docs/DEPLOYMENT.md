@@ -60,7 +60,7 @@ permission_mode = "safe"
 
 [whisper]
 model = "base"
-load_policy = "lazy"
+load_policy = "preload"
 
 [bridge]
 data_dir = "./data"
@@ -82,8 +82,8 @@ allowed_paths = ["D:/your/workspace"]
 
 语音模型加载策略可以按使用方式选择：
 
-- `preload`：桥启动时加载并常驻，第一条语音更快，但启动更慢。
-- `lazy`：第一次语音时加载并常驻，默认推荐。
+- `preload`：桥启动时加载并常驻，默认推荐，第一条语音更快，但启动更慢。
+- `lazy`：第一次语音时加载并常驻，启动更快但第一条语音会慢。
 - `per_call`：每条语音临时加载，不常驻占用内存，但每条语音都会慢。
 
 可信维护群可以在桥运行过一次后创建 `data/rules/<chat_id>.json`：
@@ -193,7 +193,7 @@ python -m feishu_claudecode_qiao --config config.toml
 通常可以保留 `data/` 里的运行数据，但不要把真实配置、日志、聊天内容或密钥提交到 Git。
 ## Claude 常驻模式部署
 
-默认部署不需要安装额外依赖，`[claude].runner = "oneshot"` 会继续使用当前的一次性 Claude CLI 调用方式。
+默认部署不需要安装额外依赖，`[claude].runner = "oneshot"` 会继续使用当前的一次性 Claude CLI 调用方式，也是稳定默认 fallback。
 
 如需启用常驻模式，先安装可选依赖：
 
@@ -213,9 +213,10 @@ persistent_enabled_chats = []
 
 说明：
 
-- `persistent` 会按飞书对话保留 Claude worker，减少 CLI 冷启动和恢复 session 的耗时。
+- `persistent` 是 SDK-backed 实验加速模式，会按飞书对话保留 Claude worker，减少 CLI 冷启动和恢复 session 的耗时。
 - `persistent_enabled_chats = []` 表示所有对话都可尝试常驻；也可以填写指定 `chat_id` 或 `session_key` 先小范围启用。
 - 如果缺少 `claude-agent-sdk`、worker 启动失败或常驻调用异常，桥会自动回退 `oneshot`，不会导致整桥无响应。
+- 常驻 worker 会用 startup prompt hash 判断角色、规则和长期记忆启动注入是否已经加载；hash 未变化时会复用，减少重复注入。
 - 常驻模式不能替代长期记忆压缩。某个 Claude 会话上下文过大时，仍然需要使用会话翻页、摘要压缩或快速任务直通来降低 token。
 - 部署后可以在飞书发送 `/runtime` 查看当前 runner 和 worker 复用状态；发送 `/memory refresh` 可以手动压缩当前对话并刷新长期记忆。
 - 每个群或个人会话可以用 `/soul`、`/soul set role ...`、`/soul set tone ...` 设置独立角色，不会影响其他对话。

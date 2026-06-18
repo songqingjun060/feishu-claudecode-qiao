@@ -39,7 +39,7 @@ class Config:
 
     # Whisper
     whisper_model: str = "base"
-    whisper_load_policy: str = "lazy"
+    whisper_load_policy: str = "preload"
 
     # Bridge
     bridge_data_dir: str = "./data"
@@ -58,6 +58,7 @@ class Config:
     bridge_queue_notice_after_seconds: int = 8
     bridge_media_batch_window_seconds: int = 10
     bridge_message_coalesce_window_seconds: int = 10
+    bridge_text_coalesce_window_seconds: int = 2
     bridge_progress_cards: bool = False
     bridge_fast_tasks_enabled: bool = True
 
@@ -113,6 +114,7 @@ def _env_override(cfg: Config) -> Config:
         bridge_queue_notice_after_seconds=_get("FEISHUCLAUDECODE_BRIDGE_QUEUE_NOTICE_AFTER_SECONDS", cfg.bridge_queue_notice_after_seconds),
         bridge_media_batch_window_seconds=_get("FEISHUCLAUDECODE_BRIDGE_MEDIA_BATCH_WINDOW_SECONDS", cfg.bridge_media_batch_window_seconds),
         bridge_message_coalesce_window_seconds=_get("FEISHUCLAUDECODE_BRIDGE_MESSAGE_COALESCE_WINDOW_SECONDS", cfg.bridge_message_coalesce_window_seconds),
+        bridge_text_coalesce_window_seconds=_get("FEISHUCLAUDECODE_BRIDGE_TEXT_COALESCE_WINDOW_SECONDS", cfg.bridge_text_coalesce_window_seconds),
         bridge_progress_cards=_get("FEISHUCLAUDECODE_BRIDGE_PROGRESS_CARDS", cfg.bridge_progress_cards),
         bridge_fast_tasks_enabled=_get("FEISHUCLAUDECODE_BRIDGE_FAST_TASKS_ENABLED", cfg.bridge_fast_tasks_enabled),
         security_allowed_paths=_get("FEISHUCLAUDECODE_SECURITY_ALLOWED_PATHS", cfg.security_allowed_paths),
@@ -149,7 +151,7 @@ def load_config(path: str | Path | None = None) -> Config:
             claude_max_workers=data.get("claude", {}).get("max_workers", 3),
             claude_persistent_enabled_chats=data.get("claude", {}).get("persistent_enabled_chats", []),
             whisper_model=data.get("whisper", {}).get("model", "base"),
-            whisper_load_policy=data.get("whisper", {}).get("load_policy", "lazy"),
+            whisper_load_policy=data.get("whisper", {}).get("load_policy", "preload"),
             bridge_data_dir=data.get("bridge", {}).get("data_dir", "./data"),
             bridge_log_level=data.get("bridge", {}).get("log_level", "INFO"),
             bridge_max_upload_mb=data.get("bridge", {}).get("max_upload_mb", 20),
@@ -166,6 +168,7 @@ def load_config(path: str | Path | None = None) -> Config:
             bridge_queue_notice_after_seconds=data.get("bridge", {}).get("queue_notice_after_seconds", 8),
             bridge_media_batch_window_seconds=data.get("bridge", {}).get("media_batch_window_seconds", 10),
             bridge_message_coalesce_window_seconds=data.get("bridge", {}).get("message_coalesce_window_seconds", 10),
+            bridge_text_coalesce_window_seconds=data.get("bridge", {}).get("text_coalesce_window_seconds", 2),
             bridge_progress_cards=data.get("bridge", {}).get("progress_cards", False),
             bridge_fast_tasks_enabled=data.get("bridge", {}).get("fast_tasks_enabled", True),
             security_allowed_paths=data.get("security", {}).get("allowed_paths", []),

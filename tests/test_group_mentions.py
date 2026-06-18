@@ -8,6 +8,7 @@ def make_bridge(tmp_path):
             feishu_app_id="cli_test",
             feishu_app_secret="secret",
             bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
         )
     )
 

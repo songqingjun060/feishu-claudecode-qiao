@@ -67,8 +67,8 @@ def test_rule_can_force_work_strategy():
     assert decision.session_id == "sid_old"
 
 
-def test_slow_claude_timing_marks_next_turn_for_rollover():
-    assert should_force_rollover_after_timing(
+def test_slow_claude_timing_does_not_force_rollover():
+    assert not should_force_rollover_after_timing(
         prompt_built_to_claude_completed_ms=35_000,
         threshold_ms=30_000,
     )

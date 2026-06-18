@@ -8,12 +8,16 @@ from feishu_claudecode_qiao.config import Config
 
 
 def make_bridge(tmp_path, **kwargs):
+    config_kwargs = {
+        "feishu_app_id": "cli_test",
+        "feishu_app_secret": "secret",
+        "bridge_data_dir": str(tmp_path),
+        "whisper_load_policy": "lazy",
+        "claude_command": "claude",
+    }
+    config_kwargs.update(kwargs)
     return Bridge(Config(
-        feishu_app_id="cli_test",
-        feishu_app_secret="secret",
-        bridge_data_dir=str(tmp_path),
-        claude_command="claude",
-        **kwargs,
+        **config_kwargs,
     ))
 
 

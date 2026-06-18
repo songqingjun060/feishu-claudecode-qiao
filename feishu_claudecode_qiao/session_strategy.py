@@ -23,7 +23,7 @@ HEAVY_MESSAGE_COUNT = 12
 _WORK_PATTERNS = (
     r"[A-Za-z]:[\\/]",
     r"\.(xlsx|xls|csv|pdf|docx|doc|pptx|zip|7z|rar|png|jpg|jpeg|mp4)\b",
-    r"\b(BI|物流码|Excel|表格|文件|图片|语音|PDF|压缩包|上传|生成|分析|查询)\b",
+    r"(BI|物流码|Excel|表格|文件|图片|语音|PDF|压缩包|上传|生成|分析|查询)",
     r"\b(read|write|edit|analyze|upload|download|query|excel|file)\b",
 )
 
@@ -65,7 +65,7 @@ def should_force_rollover_after_timing(
     prompt_built_to_claude_completed_ms: int,
     threshold_ms: int = 30_000,
 ) -> bool:
-    return prompt_built_to_claude_completed_ms >= threshold_ms
+    return False
 
 
 def _decision_for_mode(mode: str, saved_session_id: str) -> SessionDecision:

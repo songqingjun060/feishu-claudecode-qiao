@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from concurrent.futures import Future
 from threading import Lock, Thread
@@ -132,6 +133,7 @@ class _PersistentWorker:
     last_used: float
     busy: bool = False
     startup_prompt: str = ""
+    startup_hash: str = ""
 
 
 class PersistentClaudeRunner:
@@ -205,7 +207,8 @@ class PersistentClaudeRunner:
                     "key": key,
                     "busy": worker.busy,
                     "idle_seconds": int(max(0, now - worker.last_used)),
-                    "startup_loaded": bool(worker.startup_prompt),
+                    "startup_loaded": bool(worker.startup_hash),
+                    "startup_hash": worker.startup_hash[:12],
                 }
             )
         return {
@@ -249,14 +252,16 @@ class PersistentClaudeRunner:
                 error=self._sdk_import_error or "claude-agent-sdk is not installed",
             )
 
-        reused_worker = bool(worker.startup_prompt)
+        startup_hash = self._startup_hash(request.startup_prompt)
+        reused_worker = bool(worker.startup_hash)
         startup_injected = False
         worker.busy = True
         try:
-            if request.startup_prompt and request.startup_prompt != worker.startup_prompt:
+            if request.startup_prompt and startup_hash != worker.startup_hash:
                 await worker.client.query(request.startup_prompt)
                 await self._receive_response(worker.client, request)
                 worker.startup_prompt = request.startup_prompt
+                worker.startup_hash = startup_hash
                 startup_injected = True
             await worker.client.query(request.prompt)
             text, session_id = await self._receive_response(worker.client, request)
@@ -412,6 +417,16 @@ class PersistentClaudeRunner:
         disconnect = getattr(worker.client, "disconnect", None)
         if disconnect:
             await disconnect()
+
+    def _startup_hash(self, prompt: str) -> str:
+        if not prompt:
+            return ""
+        canonical = "\n".join(
+            line.strip()
+            for line in prompt.splitlines()
+            if line.strip()
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     async def _close_all_async(self) -> None:
         for key in list(self._workers):
