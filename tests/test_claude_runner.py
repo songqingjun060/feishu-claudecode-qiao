@@ -169,6 +169,21 @@ def test_persistent_runner_reuses_client_for_same_session_key():
     assert FakeSDKClient.created[0].queries == ["one", "two"]
 
 
+def test_persistent_runner_injects_startup_prompt_once_per_worker():
+    FakeSDKClient.created = []
+    runner = PersistentClaudeRunner(
+        client_cls=FakeSDKClient,
+        options_cls=FakeSDKOptions,
+        now=lambda: 100.0,
+    )
+
+    runner.run(ClaudeRunRequest(prompt="one", session_key="chat:1", startup_prompt="soul"))
+    runner.run(ClaudeRunRequest(prompt="two", session_key="chat:1", startup_prompt="soul"))
+
+    assert len(FakeSDKClient.created) == 1
+    assert FakeSDKClient.created[0].queries == ["soul", "one", "two"]
+
+
 def test_persistent_runner_returns_error_when_sdk_is_unavailable():
     runner = PersistentClaudeRunner(client_cls=None, options_cls=None, sdk_available=False)
 
@@ -224,7 +239,7 @@ def test_bridge_limits_persistent_runner_to_enabled_chats(tmp_path):
     assert not bridge.claude_runner.enabled(ClaudeRunRequest(prompt="hi", session_key="chat:other"))
 
 
-def test_bridge_does_not_reuse_persistent_chat_worker_for_stateless_calls(tmp_path):
+def test_bridge_reuses_persistent_chat_worker_even_without_session_id(tmp_path):
     bridge = Bridge(
         Config(
             feishu_app_id="cli_test",
@@ -246,6 +261,6 @@ def test_bridge_does_not_reuse_persistent_chat_worker_for_stateless_calls(tmp_pa
 
     assert requests[0].session_key == "chat:oc_1"
     assert requests[0].session_id == "sid_1"
-    assert requests[1].session_key == ""
+    assert requests[1].session_key == "chat:oc_1"
     assert requests[1].session_id is None
     assert requests[1].chat_id == "oc_1"

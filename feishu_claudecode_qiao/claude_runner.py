@@ -16,6 +16,7 @@ class ClaudeRunRequest:
     permission_mode: str | None = None
     session_key: str = ""
     chat_id: str = ""
+    startup_prompt: str = ""
     on_text: Callable[[str], None] | None = None
     cancel_requested: Callable[[], bool] | None = None
 
@@ -26,6 +27,8 @@ class ClaudeRunResult:
     session_id: str | None = None
     error: str = ""
     timing: dict[str, int] = field(default_factory=dict)
+    reused_worker: bool = False
+    startup_injected: bool = False
 
 
 class ClaudeRunner(Protocol):
@@ -96,6 +99,7 @@ class _PersistentWorker:
     client: Any
     last_used: float
     busy: bool = False
+    startup_prompt: str = ""
 
 
 class PersistentClaudeRunner:
@@ -193,12 +197,24 @@ class PersistentClaudeRunner:
                 error=self._sdk_import_error or "claude-agent-sdk is not installed",
             )
 
+        reused_worker = bool(worker.startup_prompt)
+        startup_injected = False
         worker.busy = True
         try:
+            if request.startup_prompt and request.startup_prompt != worker.startup_prompt:
+                await worker.client.query(request.startup_prompt)
+                await self._receive_response(worker.client, request)
+                worker.startup_prompt = request.startup_prompt
+                startup_injected = True
             await worker.client.query(request.prompt)
             text, session_id = await self._receive_response(worker.client, request)
             worker.last_used = self._now()
-            return ClaudeRunResult(text=text, session_id=session_id or request.session_id)
+            return ClaudeRunResult(
+                text=text,
+                session_id=session_id or request.session_id,
+                reused_worker=reused_worker,
+                startup_injected=startup_injected,
+            )
         finally:
             worker.busy = False
 

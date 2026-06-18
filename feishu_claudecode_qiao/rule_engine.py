@@ -14,6 +14,13 @@ DEFAULT_RULE = {
     "permission_profile": "safe",
     "session_mode": "shared_chat",
     "custom_prompt": "",
+    "soul": {
+        "name": "Qiao",
+        "role": "当前飞书对话框里的 Claude Code 协作助手",
+        "tone": "简洁、可靠、贴近当前对话场景",
+        "business_context": "",
+        "output_style": "优先用简体中文，直接给出可执行结论",
+    },
     "members": {},
     "rule_admins": [],
     "confirm_policy": {

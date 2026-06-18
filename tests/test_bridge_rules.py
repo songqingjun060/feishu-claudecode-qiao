@@ -14,14 +14,14 @@ def make_bridge(tmp_path):
 def test_build_prompt_with_chat_custom_prompt(tmp_path):
     bridge = make_bridge(tmp_path)
     rule = resolve_rule({"custom_prompt": "chat_prompt"})
-    prompt = bridge._build_prompt("c1", "张三", "hello", rule)
+    prompt = bridge._build_startup_prompt("chat:c1", rule)
     assert "chat_prompt" in prompt
 
 
 def test_build_prompt_with_workspace(tmp_path):
     bridge = make_bridge(tmp_path)
     rule = resolve_rule({"workspace": "D:/project"})
-    prompt = bridge._build_prompt("c1", "张三", "hello", rule)
+    prompt = bridge._build_startup_prompt("chat:c1", rule)
     assert "D:/project" in prompt
 
 
@@ -38,7 +38,7 @@ def test_build_prompt_includes_security_boundary_with_allowed_paths(tmp_path):
         "allowed_paths": ["D:/project-a/data"],
     })
 
-    prompt = bridge._build_prompt("chat_a", "张三", "你能访问哪些文件？", rule)
+    prompt = bridge._build_startup_prompt("chat:chat_a", rule)
 
     assert "<bridge_security_boundary>" in prompt
     assert "Current chat workspace:" in prompt
@@ -58,7 +58,7 @@ def test_build_prompt_uses_default_workspace_in_security_boundary(tmp_path):
     ))
     rule = resolve_rule({})
 
-    prompt = bridge._build_prompt("chat_a", "张三", "workspace?", rule)
+    prompt = bridge._build_startup_prompt("chat:chat_a", rule)
 
     assert "Current chat workspace:" in prompt
     assert "D:/default-work" in prompt
@@ -69,8 +69,50 @@ def test_build_prompt_includes_permission_profile_and_mode(tmp_path):
     bridge = make_bridge(tmp_path)
     rule = resolve_rule({"permission_profile": "admin"})
 
-    prompt = bridge._build_prompt("chat_a", "tester", "权限?", rule)
+    prompt = bridge._build_startup_prompt("chat:chat_a", rule)
 
     assert "Current chat permission:" in prompt
     assert "permission_profile: admin" in prompt
     assert "claude_permission_mode: bypassPermissions" in prompt
+
+
+def test_startup_prompt_includes_chat_soul_memory_and_security(tmp_path):
+    bridge = make_bridge(tmp_path)
+    rule = resolve_rule(
+        {
+            "soul": {
+                "name": "BI-Qiao",
+                "role": "BI logistics assistant",
+                "tone": "direct",
+                "business_context": "logistics code checks",
+                "output_style": "Chinese summary first",
+            },
+            "permission_profile": "admin",
+        }
+    )
+    bridge.session_store.archive_and_rollover(
+        "chat:oc_1",
+        "summary",
+        "sid_old",
+        rolling_summary="remember logistics workflow",
+    )
+
+    prompt = bridge._build_startup_prompt("chat:oc_1", rule)
+
+    assert "<chat_soul>" in prompt
+    assert "BI-Qiao" in prompt
+    assert "logistics code checks" in prompt
+    assert "<chat_memory>" in prompt
+    assert "remember logistics workflow" in prompt
+    assert "<bridge_security_boundary>" in prompt
+
+
+def test_per_message_prompt_is_incremental(tmp_path):
+    bridge = make_bridge(tmp_path)
+    rule = resolve_rule({"custom_prompt": "heavy startup prompt"})
+
+    prompt = bridge._build_prompt("chat_a", "tester", "hello", rule)
+
+    assert "hello" in prompt
+    assert "heavy startup prompt" not in prompt
+    assert "<bridge_security_boundary>" not in prompt

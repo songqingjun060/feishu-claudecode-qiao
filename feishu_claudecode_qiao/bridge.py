@@ -1,4 +1,4 @@
-"""Bridge: reads Feishu WebSocket events, calls Claude CLI, sends replies.
+﻿"""Bridge: reads Feishu WebSocket events, calls Claude CLI, sends replies.
 
 Design principles:
 - Event ingestion stays responsive while chat workers process messages
@@ -194,6 +194,7 @@ class Bridge:
         self._ws_watchdog_failures = 0
         self._recent_audio_by_chat: dict[str, dict[str, Any]] = {}
         self._recent_files_by_chat: dict[str, dict[str, Any]] = {}
+        self._last_claude_run_meta: dict[str, Any] = {}
         self._whisper_model: Any | None = None
         self._whisper_model_name: str | None = None
         self._whisper_load_policy = (config.whisper_load_policy or "lazy").lower()
@@ -2150,6 +2151,7 @@ class Bridge:
                 chat_id=chat_id,
                 cwd=effective_workspace,
                 permission_mode=permission_mode,
+                startup_prompt=self._build_startup_prompt(session_key, effective_rule),
             )
             self.scheduler.update_stage(active_run_id, "claude_completed")
             timing.mark("claude_completed")
@@ -2175,6 +2177,9 @@ class Bridge:
                 memory_context_chars=memory_context_chars,
                 resumed=bool(session_id),
                 claude_ms=claude_ms,
+                runtime_key=session_key or "",
+                runtime_reused=bool(self._last_claude_run_meta.get("reused_worker")),
+                startup_injected=bool(self._last_claude_run_meta.get("startup_injected")),
             )
 
             self._cache_recent_files_from_text(chat_id, reply, effective_security)
@@ -2796,6 +2801,51 @@ Rules:
 - If asked what files or directories you can access, answer only with the current chat workspace and user-authorized allowed_paths shown above.
 </bridge_security_boundary>"""
 
+    def _chat_soul_prompt(self, effective_rule: EffectiveRule) -> str:
+        soul = effective_rule.get("soul", {}) or {}
+        name = str(soul.get("name", "") or "Qiao")
+        role = str(soul.get("role", "") or "当前飞书对话框里的 Claude Code 协作助手")
+        tone = str(soul.get("tone", "") or "简洁、可靠、贴近当前对话场景")
+        business_context = str(soul.get("business_context", "") or "")
+        output_style = str(soul.get("output_style", "") or "优先用简体中文，直接给出可执行结论")
+        parts = [
+            "<chat_soul>",
+            f"name: {name}",
+            f"role: {role}",
+            f"tone: {tone}",
+            f"output_style: {output_style}",
+        ]
+        if business_context:
+            parts.append(f"business_context: {business_context}")
+        parts.append(
+            "instruction: 这是当前 chat 独立的角色设定。保持这个对话框的长期人格、业务习惯和输出风格，不要把自己当成全新机器人。"
+        )
+        parts.append("</chat_soul>")
+        return "\n".join(parts)
+
+    def _build_startup_prompt(
+        self,
+        session_key: str | None,
+        effective_rule: EffectiveRule,
+    ) -> str:
+        parts = [
+            self._chat_soul_prompt(effective_rule),
+            self._security_boundary_prompt(effective_rule),
+        ]
+        memory_context = self._memory_context_for_prompt(session_key, effective_rule)
+        if memory_context:
+            parts.append(memory_context)
+        custom_prompt = effective_rule.get("custom_prompt", "")
+        if custom_prompt:
+            parts.append(f"chat_custom_prompt:\n{custom_prompt}")
+        workspace = effective_rule.get("workspace", "")
+        if workspace:
+            parts.append(f"workspace: {workspace}")
+        parts.append(
+            "以上内容是当前 chat runtime 的启动上下文。后续用户消息会增量发送；除非收到新的规则、记忆或权限更新，不要要求重复提供这些背景。"
+        )
+        return "\n\n".join(parts)
+
     def _build_prompt(
         self,
         chat_id: str,
@@ -2803,26 +2853,13 @@ Rules:
         content: str,
         effective_rule: EffectiveRule,
     ) -> str:
-        """Build the prompt sent to Claude CLI."""
-        custom_prompt = effective_rule.get("custom_prompt", "")
-        workspace = effective_rule.get("workspace", "")
-
-        parts: list[str] = []
-
-        parts.append(self._security_boundary_prompt(effective_rule))
-
-        if custom_prompt:
-            parts.append(f"系统提示: {custom_prompt}")
-
-        if workspace:
-            parts.append(f"工作目录: {workspace}")
-
-        parts.append(f"用户: {sender_name}")
-        parts.append(f"消息: {content}")
-
-
-        return "\n\n".join(parts)
-
+        """Build the per-message prompt sent to the chat runtime."""
+        return "\n\n".join(
+            [
+                f"用户: {sender_name}",
+                f"消息: {content}",
+            ]
+        )
     # ------------------------------------------------------------------
     # Claude CLI
     # ------------------------------------------------------------------
@@ -3068,6 +3105,7 @@ Rules:
         chat_id: str | None = None,
         cwd: str | None = None,
         permission_mode: str | None = None,
+        startup_prompt: str = "",
     ) -> tuple[str, str | None]:
         reply, new_session = self._run_claude(
             prompt,
@@ -3076,6 +3114,7 @@ Rules:
             chat_id=chat_id,
             cwd=cwd,
             permission_mode=permission_mode,
+            startup_prompt=startup_prompt,
         )
 
         if self._is_transient_claude_error(reply):
@@ -3104,6 +3143,7 @@ Rules:
                 chat_id=chat_id,
                 cwd=cwd,
                 permission_mode=permission_mode,
+                startup_prompt=startup_prompt,
             )
 
         if session_key and self._is_context_limit_reply(reply):
@@ -3117,6 +3157,7 @@ Rules:
                 chat_id=chat_id,
                 cwd=cwd,
                 permission_mode=permission_mode,
+                startup_prompt=startup_prompt,
             )
 
         return reply, new_session
@@ -3130,13 +3171,12 @@ Rules:
         chat_id: str | None = None,
         cwd: str | None = None,
         permission_mode: str | None = None,
+        startup_prompt: str = "",
     ) -> tuple[str, str | None]:
         runner = self.claude_runner
         if isinstance(runner, OneShotClaudeRunner):
             runner = OneShotClaudeRunner(self._call_claude)
         runner_session_key = session_key or ""
-        if not session_id:
-            runner_session_key = ""
         result = runner.run(
             ClaudeRunRequest(
                 prompt=prompt,
@@ -3145,10 +3185,15 @@ Rules:
                 permission_mode=permission_mode,
                 session_key=runner_session_key,
                 chat_id=chat_id or "",
+                startup_prompt=startup_prompt if runner_session_key else "",
             )
         )
         if result.error:
             return f"[错误: 无法调用Claude CLI: {result.error}]", result.session_id
+        self._last_claude_run_meta = {
+            "reused_worker": result.reused_worker,
+            "startup_injected": result.startup_injected,
+        }
         return result.text, result.session_id
 
     # ------------------------------------------------------------------
@@ -3642,3 +3687,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
