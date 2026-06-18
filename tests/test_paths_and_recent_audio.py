@@ -581,6 +581,38 @@ def test_followup_analysis_uses_recent_uploaded_file_context(tmp_path, monkeypat
     assert "Do not rely on pdftoppm as the first option" in prompts[-1]
 
 
+def test_new_file_message_downloads_current_file_not_previous_recent_file(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    old_file = tmp_path / "old.xlsx"
+    new_file = tmp_path / "new.xlsx"
+    old_file.write_text("old", encoding="utf-8")
+    new_file.write_text("new", encoding="utf-8")
+    prompts = []
+
+    bridge._cache_recent_file_path("oc_1", str(old_file))
+    monkeypatch.setattr(bridge, "_process_file", lambda msg_id, content_obj: str(new_file))
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("ok", "sid_1"),
+    )
+    monkeypatch.setattr(bridge, "_send_event_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event_body(
+        make_event(
+            chat_type="p2p",
+            msg_type="file",
+            content_obj={"file_key": "file_v3_new", "file_name": "new.xlsx"},
+            message_id="om_file_new",
+        )
+    )
+
+    assert prompts
+    assert str(new_file.resolve()) in prompts[-1]
+    assert str(old_file.resolve()) not in prompts[-1]
+    assert bridge._recent_files_by_chat["oc_1"]["files"][-1] == str(new_file.resolve())
+
+
 def test_unmentioned_group_file_is_cached_when_event_arrives(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     saved = tmp_path / "codes.xlsx"

@@ -1915,9 +1915,7 @@ class Bridge:
                 content = "[\u8bed\u97f3\u6d88\u606f]"
         elif msg_type == "file":
             timing.mark("media_start")
-            recent = self._recent_files_by_chat.get(chat_id)
-            recent_files = [str(path) for path in (recent or {}).get("files", [])]
-            file_info = recent_files[-1] if recent_files else self._process_file(msg_id, content_obj)
+            file_info = self._process_file(msg_id, content_obj)
             if file_info:
                 self._cache_recent_file_path(chat_id, file_info)
                 self._remember_media_item(
@@ -2986,13 +2984,16 @@ Rules:
         runner = self.claude_runner
         if isinstance(runner, OneShotClaudeRunner):
             runner = OneShotClaudeRunner(self._call_claude)
+        runner_session_key = session_key or ""
+        if not session_id:
+            runner_session_key = ""
         result = runner.run(
             ClaudeRunRequest(
                 prompt=prompt,
                 session_id=session_id,
                 cwd=cwd,
                 permission_mode=permission_mode,
-                session_key=session_key or "",
+                session_key=runner_session_key,
                 chat_id=chat_id or "",
             )
         )

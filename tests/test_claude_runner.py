@@ -222,3 +222,30 @@ def test_bridge_limits_persistent_runner_to_enabled_chats(tmp_path):
     assert isinstance(bridge.claude_runner, ConditionalClaudeRunner)
     assert bridge.claude_runner.enabled(ClaudeRunRequest(prompt="hi", session_key="chat:allowed"))
     assert not bridge.claude_runner.enabled(ClaudeRunRequest(prompt="hi", session_key="chat:other"))
+
+
+def test_bridge_does_not_reuse_persistent_chat_worker_for_stateless_calls(tmp_path):
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+        )
+    )
+    requests = []
+
+    class RecordingBridgeRunner:
+        def run(self, request):
+            requests.append(request)
+            return ClaudeRunResult(text="ok", session_id=request.session_id or "new_sid")
+
+    bridge.claude_runner = RecordingBridgeRunner()
+
+    bridge._run_claude("work", "sid_1", session_key="chat:oc_1", chat_id="oc_1")
+    bridge._run_claude("light", None, session_key="chat:oc_1", chat_id="oc_1")
+
+    assert requests[0].session_key == "chat:oc_1"
+    assert requests[0].session_id == "sid_1"
+    assert requests[1].session_key == ""
+    assert requests[1].session_id is None
+    assert requests[1].chat_id == "oc_1"
