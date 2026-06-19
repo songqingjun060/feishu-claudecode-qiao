@@ -85,8 +85,35 @@ def test_call_claude_reads_stream_json_incrementally_and_logs_preview(tmp_path, 
     assert reply == "你好，世界"
     assert session_id == "sid_new"
     output = capsys.readouterr().out
-    assert "Claude 思考中" in output
+    assert "🧠 Claude 思考中..." in output
     assert "你好，世界" in output
+
+
+def test_run_claude_persistent_prints_thinking_banner(tmp_path, capsys):
+    bridge = make_bridge(tmp_path, bridge_console_claude_stream=True)
+
+    class FakeRunner:
+        def run(self, request):
+            return types.SimpleNamespace(
+                text="ok",
+                session_id="sid_new",
+                error=None,
+                reused_worker=True,
+                startup_injected=False,
+            )
+
+    bridge.claude_runner = FakeRunner()
+
+    reply, session_id = bridge._run_claude(
+        "ping",
+        None,
+        session_key="chat:oc_1",
+        chat_id="oc_1",
+    )
+
+    assert reply == "ok"
+    assert session_id == "sid_new"
+    assert "🧠 Claude 思考中..." in capsys.readouterr().out
 
 
 def test_call_claude_uses_result_when_stream_is_empty(tmp_path, monkeypatch):

@@ -3100,6 +3100,19 @@ Rules:
             or "context length exceeded" in lowered
         )
 
+    def _emit_console(self, text: str, *, end: str = "\n") -> None:
+        if self.config.bridge_console_claude_stream:
+            try:
+                print(text, end=end, flush=True)
+            except OSError as exc:
+                self.bridge_logger.warning(f"Console stream disabled after output error: {exc}")
+                object.__setattr__(self.config, "bridge_console_claude_stream", False)
+
+    def _emit_claude_thinking_banner(self) -> None:
+        self._emit_console("\n" + "-" * 60)
+        self._emit_console("🧠 Claude 思考中...")
+        self._emit_console("-" * 60)
+
     def _build_claude_popen_args(self, args: list[str]) -> tuple[list[str] | str, bool]:
         import subprocess
         cli = args[0]
@@ -3131,14 +3144,6 @@ Rules:
         new_session_id: str | None = None
         result_text = ""
 
-        def emit_console(text: str, *, end: str = "\n") -> None:
-            if self.config.bridge_console_claude_stream:
-                try:
-                    print(text, end=end, flush=True)
-                except OSError as exc:
-                    self.bridge_logger.warning(f"Console stream disabled after output error: {exc}")
-                    object.__setattr__(self.config, "bridge_console_claude_stream", False)
-
         def handle_line(line: str) -> None:
             nonlocal final_text, new_session_id, result_text
             line = line.strip()
@@ -3163,7 +3168,7 @@ Rules:
                         chunk = delta.get("text", "")
                         final_text += chunk
                         if chunk:
-                            emit_console(chunk, end="")
+                            self._emit_console(chunk, end="")
             elif event_type == "result":
                 result = event.get("result", "")
                 if isinstance(result, str):
@@ -3196,15 +3201,13 @@ Rules:
                 proc.stdin.write(prompt + "\n")
                 proc.stdin.close()
 
-            emit_console("\n" + "-" * 60)
-            emit_console("Claude 思考中...")
-            emit_console("-" * 60)
+            self._emit_claude_thinking_banner()
 
             if proc.stdout:
                 for raw_line in proc.stdout:
                     handle_line(raw_line)
             proc.wait(timeout=600)
-            emit_console("\n" + "-" * 60)
+            self._emit_console("\n" + "-" * 60)
             stderr = proc.stderr.read() if proc.stderr else ""
         except subprocess.TimeoutExpired:
             if proc is not None:
@@ -3333,8 +3336,11 @@ Rules:
         startup_prompt: str = "",
     ) -> tuple[str, str | None]:
         runner = self.claude_runner
-        if isinstance(runner, OneShotClaudeRunner):
+        is_oneshot = isinstance(runner, OneShotClaudeRunner)
+        if is_oneshot:
             runner = OneShotClaudeRunner(self._call_claude)
+        else:
+            self._emit_claude_thinking_banner()
         runner_session_key = session_key or ""
         result = runner.run(
             ClaudeRunRequest(
