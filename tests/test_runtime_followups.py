@@ -161,3 +161,35 @@ def test_context_decision_records_message_id(tmp_path, monkeypatch):
     ]
     decision = [record for record in records if record.get("action") == "context_decision"][-1]
     assert decision["message_id"] == "om_audit"
+
+
+def test_reaction_events_are_not_dispatched_as_messages(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.bridge import Bridge
+    from feishu_claudecode_qiao.config import Config
+
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
+        )
+    )
+    dispatched = []
+    monkeypatch.setattr(bridge.event_dispatcher, "dispatch", dispatched.append)
+
+    event = bridge._normalize_event(
+        {
+            "action": "added",
+            "action_time": "1781831542112",
+            "emoji_type": "OK",
+            "event_id": "evt_reaction",
+            "message_id": "om_source",
+            "timestamp": "1781831542112",
+            "type": "im.message.reaction.created_v1",
+        }
+    )
+
+    bridge._dispatch_event(event)
+
+    assert dispatched == []

@@ -1594,7 +1594,25 @@ class Bridge:
         return self.ws_events_file.stat().st_size
 
     def _dispatch_event(self, event: dict[str, Any]) -> None:
+        if not self._is_message_receive_event(event):
+            event_type = self._event_type(event)
+            if event_type:
+                self.bridge_logger.debug(f"Ignored non-message event: {event_type}")
+            return
         self.event_dispatcher.dispatch(event)
+
+    def _event_type(self, event: dict[str, Any]) -> str:
+        return str(
+            event.get("type")
+            or event.get("header", {}).get("event_type")
+            or event.get("schema", "")
+        )
+
+    def _is_message_receive_event(self, event: dict[str, Any]) -> bool:
+        message = event.get("event", {}).get("message")
+        if isinstance(message, dict):
+            return bool(message.get("chat_id") and message.get("message_id"))
+        return event.get("type") == "im.message.receive_v1"
 
     # ------------------------------------------------------------------
     # Event processing
