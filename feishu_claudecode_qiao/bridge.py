@@ -652,6 +652,30 @@ class Bridge:
         )
         return any(word in text for word in result_words)
 
+    def _is_recent_bi_analysis_intent(self, content: str) -> bool:
+        if not self._is_recent_bi_result_intent(content):
+            return False
+        text = content.lower()
+        analysis_words = (
+            "\u5206\u6790",
+            "\u6574\u7406",
+            "\u6c47\u603b",
+            "\u603b\u7ed3",
+            "\u751f\u6210",
+            "\u7ee7\u7eed",
+            "\u6839\u636e",
+            "\u5e2e\u6211",
+            "\u770b\u4e00\u4e0b",
+            "\u770b\u770b",
+            "\u5224\u65ad",
+            "\u5bf9\u6bd4",
+            "analyze",
+            "summarize",
+            "continue",
+            "based on",
+        )
+        return any(word in text for word in analysis_words)
+
     def _try_reply_recent_bi_result(
         self,
         *,
@@ -664,6 +688,8 @@ class Bridge:
         effective_security: SecurityPolicy,
     ) -> bool:
         if not self._is_recent_bi_result_intent(content):
+            return False
+        if self._is_recent_bi_analysis_intent(content):
             return False
         with self._state_lock:
             recent = self._recent_bi_results_by_chat.get(chat_id)
@@ -704,6 +730,33 @@ class Bridge:
             sender_name,
         )
         return True
+
+    def _recent_bi_context(self, chat_id: str, content: str) -> str:
+        if not content.strip():
+            return ""
+        with self._state_lock:
+            recent = self._recent_bi_results_by_chat.get(chat_id)
+        if not recent:
+            return ""
+        if time.time() - float(recent.get("created_at", 0)) > 1800:
+            with self._state_lock:
+                self._recent_bi_results_by_chat.pop(chat_id, None)
+            return ""
+        reply_text = str(recent.get("reply_text") or "").strip()
+        if not reply_text:
+            return ""
+        lines = [
+            "\n\n<bridge_recent_bi_result>",
+            "instruction: 这是当前聊天窗口最近一次 BI 查询的完整结果。用户如果要求基于刚才结果继续分析、整理或生成内容，请直接使用这里的结果，不要说找不到上下文。",
+        ]
+        file_path = str(recent.get("file_path") or "")
+        if file_path:
+            lines.append(f"file_path: {file_path}")
+            lines.append(f"uploaded: {bool(recent.get('uploaded'))}")
+        lines.append("result:")
+        lines.append(reply_text)
+        lines.append("</bridge_recent_bi_result>")
+        return "\n".join(lines)
 
     def _ensure_bi_result_attachment(self, result: Any) -> str:
         if getattr(result, "excel_path", ""):
@@ -2249,6 +2302,10 @@ class Bridge:
         )
         if recent_file_context:
             content += recent_file_context
+
+        recent_bi_context = self._recent_bi_context(chat_id, content)
+        if recent_bi_context:
+            content += recent_bi_context
 
         # Check rollover BEFORE getting session_id
         rollover_summary = ""

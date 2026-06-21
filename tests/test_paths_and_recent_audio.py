@@ -644,6 +644,53 @@ def test_bi_query_followup_result_uses_cached_fast_task_without_claude(tmp_path,
     assert replies == [("BI 明细结果", "text")]
 
 
+def test_bi_query_followup_analysis_injects_cached_result_for_claude(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    bridge.config = Config(
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
+        bridge_data_dir=str(tmp_path / "data"),
+        claude_work_dir=str(tmp_path),
+        security_allowed_paths=[str(tmp_path)],
+        bridge_fast_tasks_enabled=True,
+    )
+    prompts = []
+    replies = []
+    bridge._cache_recent_bi_result(
+        "oc_1",
+        "BI 明细结果\n物流码：26021312404478\n产品名称：古井贡酒经典45度500ml",
+        file_path="D:/result.xlsx",
+    )
+
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("分析完成", "sid_1"),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_event_reply",
+        lambda chat_id, content, msg_type, chat_type, msg_id, sender, sender_name: replies.append(
+            (content, msg_type)
+        )
+        or True,
+    )
+
+    bridge._process_event_body(
+        make_event(
+            content_obj={"text": "@_user_1 根据刚才结果分析一下"},
+            mentions=bot_mention(),
+            message_id="om_analyze",
+        )
+    )
+
+    assert len(prompts) == 1
+    assert "<bridge_recent_bi_result>" in prompts[0]
+    assert "物流码：26021312404478" in prompts[0]
+    assert "产品名称：古井贡酒经典45度500ml" in prompts[0]
+    assert replies == [('{"text":"分析完成"}', "text")]
+
+
 def test_bi_query_fast_path_replies_error_without_calling_claude(tmp_path, monkeypatch):
     from feishu_claudecode_qiao.tasks.bi_logistics import BiLogisticsResult
 
