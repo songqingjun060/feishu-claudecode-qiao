@@ -42,6 +42,8 @@ text_coalesce_window_seconds = 2
 message_coalesce_window_seconds = 10
 progress_cards = false
 fast_tasks_enabled = true
+# BI 物流码快速任务工具目录；默认指向支持 api.enabled 的接口直查版。
+bi_logistics_tool_dir = "D:/BI-wuliumachaxun"
 # 如果 bot_admins 为空，只有 bot_owner_id 能修改群规则。
 bot_owner_id = ""
 bot_admins = []

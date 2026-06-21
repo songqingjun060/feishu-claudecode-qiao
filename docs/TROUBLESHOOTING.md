@@ -134,10 +134,11 @@ im:message.group_msg
 - `bridge.fast_tasks_enabled` 是否为 `true`。
 - 文本里是否明确包含“BI”“物流码”“查询”等词。
 - 是否能从消息里提取来源单号、WMS 配货单号或物流码。
-- `C:\Users\tanks\BI-wuliumachaxun` 下是否存在 `query-logistics-codes.js` 或 `BI-wuliumachaxun.exe`。
+- `bridge.bi_logistics_tool_dir` 指向的目录是否正确；默认是 `D:\BI-wuliumachaxun`，这份工具支持 `api.enabled` 接口直查。
+- 工具目录下是否存在 `query-logistics-codes.js` 或 `BI-wuliumachaxun.exe`。
 - BI 工具本身是否能在 PowerShell 中独立执行。
 
-快速路径失败时桥会降级给 Claude Code，避免任务直接丢失。排查耗时请看 `data/logs/audit.jsonl` 中的 `fast_task_started`、`fast_task_completed`、`fast_task_failed`。
+快速路径失败时桥会直接返回失败原因，不再静默等待 Claude Code。排查耗时请看 `data/logs/audit.jsonl` 中的 `fast_task_started`、`fast_task_completed`、`fast_task_failed`。
 
 ## Claude 提示无法读取本地文件
 

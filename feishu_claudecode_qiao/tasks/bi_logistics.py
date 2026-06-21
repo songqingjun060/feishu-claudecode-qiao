@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-DEFAULT_TOOL_DIR = Path("C:/Users/tanks/BI-wuliumachaxun")
+DEFAULT_TOOL_DIR = Path("D:/BI-wuliumachaxun")
 
 
 @dataclass(frozen=True)

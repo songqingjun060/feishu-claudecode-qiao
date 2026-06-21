@@ -183,7 +183,7 @@ class Bridge:
         self.claude_runner = self._make_claude_runner()
         self.bridge_logger.info(f"Claude runner: {config.claude_runner or 'oneshot'}")
         self.task_router = TaskRouter()
-        self.bi_logistics_runner = BiLogisticsRunner()
+        self.bi_logistics_runner = BiLogisticsRunner(config.bridge_bi_logistics_tool_dir)
         self._state_lock = RLock()
         self._token_lock = RLock()
         self._token: str | None = None
