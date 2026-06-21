@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 from feishu_claudecode_qiao.tasks.bi_logistics import (
@@ -49,3 +50,24 @@ def test_bi_runner_invokes_source_query(tmp_path, monkeypatch):
     assert args[:2] == ["node", str(script)]
     assert "--source" in args
     assert "Q202605270017-5/7" in args
+    assert calls[0][1]["encoding"] == "utf-8"
+    assert calls[0][1]["errors"] == "replace"
+
+
+def test_bi_runner_returns_error_on_timeout(tmp_path, monkeypatch):
+    tool_dir = tmp_path / "tool"
+    tool_dir.mkdir()
+    script = tool_dir / "query-logistics-codes.js"
+    script.write_text("console.log('ok')", encoding="utf-8")
+
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr("feishu_claudecode_qiao.tasks.bi_logistics.subprocess.run", fake_run)
+
+    runner = BiLogisticsRunner(tool_dir=tool_dir)
+    result = runner.run(BiLogisticsRequest(codes=["26021312404478"]), timeout_seconds=1)
+
+    assert result.ok is False
+    assert "超时" in result.error
+    assert "26021312404478" in result.error

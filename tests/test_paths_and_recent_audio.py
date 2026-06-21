@@ -500,6 +500,47 @@ def test_bi_query_fast_path_uploads_without_calling_claude(tmp_path, monkeypatch
     assert replies == [("BI 物流码查询完成：共 1 条。\n已上传文件：bi-fast.xlsx", "text")]
 
 
+def test_bi_query_fast_path_replies_error_without_calling_claude(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.tasks.bi_logistics import BiLogisticsResult
+
+    bridge = make_bridge(tmp_path)
+    bridge.config = Config(
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
+        bridge_data_dir=str(tmp_path / "data"),
+        claude_work_dir=str(tmp_path),
+        bridge_fast_tasks_enabled=True,
+    )
+    replies = []
+
+    class FakeRunner:
+        def run(self, request):
+            return BiLogisticsResult(ok=False, error="BI 查询工具超时（180 秒）：26021312404478")
+
+    bridge.bi_logistics_runner = FakeRunner()
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("BI 快速路径失败也不应再调用 Claude")
+        ),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_send_event_reply",
+        lambda chat_id, content, msg_type, chat_type, msg_id, sender, sender_name: replies.append(
+            (content, msg_type)
+        )
+        or True,
+    )
+
+    bridge._process_event_body(
+        make_event(chat_type="p2p", content_obj={"text": "26021312404478 物流码查询"})
+    )
+
+    assert replies == [("BI 查询失败：BI 查询工具超时（180 秒）：26021312404478", "text")]
+
+
 def test_process_event_registers_active_run_while_calling_claude(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     statuses = []

@@ -1182,7 +1182,16 @@ class Bridge:
                 task_kind=match.task_kind,
                 error=result.error,
             )
-            return False
+            self._send_event_reply(
+                chat_id,
+                f"BI 查询失败：{result.error or '未知错误'}",
+                "text",
+                chat_type,
+                msg_id,
+                sender,
+                sender_name,
+            )
+            return True
 
         uploaded = False
         reply_text = result.summary or "BI 物流码查询完成。"

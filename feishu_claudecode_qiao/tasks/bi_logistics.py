@@ -51,13 +51,27 @@ class BiLogisticsRunner:
         else:
             return BiLogisticsResult(ok=False, error="未提供可查询的物流码、来源单号或 WMS 配货单号。")
 
-        completed = subprocess.run(
-            args,
-            cwd=self.tool_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
+        try:
+            completed = subprocess.run(
+                args,
+                cwd=self.tool_dir,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            target = ",".join(request.codes or request.sources or request.wms_orders)
+            return BiLogisticsResult(
+                ok=False,
+                error=f"BI 查询工具超时（{timeout_seconds} 秒）：{target}",
+            )
+        except (OSError, UnicodeError) as exc:
+            return BiLogisticsResult(
+                ok=False,
+                error=f"BI 查询工具调用失败：{exc}",
+            )
         output = (completed.stdout or "").strip()
         if completed.returncode != 0:
             return BiLogisticsResult(
