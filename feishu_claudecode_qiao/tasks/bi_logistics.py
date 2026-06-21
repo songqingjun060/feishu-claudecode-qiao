@@ -95,7 +95,7 @@ def parse_bi_output(output: str) -> BiLogisticsResult:
         return BiLogisticsResult(ok=True, summary=text, raw_output=text)
 
     excel_path = str(payload.get("excelFilePath") or "")
-    ok = payload.get("ok", True) is not False
+    ok = payload.get("ok", payload.get("success", True)) is not False
     if not ok:
         return BiLogisticsResult(
             ok=False,
@@ -119,6 +119,79 @@ def _summarize_payload(payload: dict) -> str:
     for item in results:
         if item.get("found"):
             found += 1
-    if total:
-        return f"BI 物流码查询完成：模式 {mode}，共 {total} 条，查询到 {found} 条。"
-    return "BI 物流码查询完成。"
+    summary = f"BI 物流码查询完成：模式 {mode}，共 {total} 条，查询到 {found} 条。" if total else "BI 物流码查询完成。"
+    detail = _format_payload_details(payload)
+    if detail:
+        return f"{summary}\n\n{detail}"
+    return summary
+
+
+def _format_payload_details(payload: dict) -> str:
+    mode = str(payload.get("mode") or "code")
+    results = payload.get("results") or []
+    if mode == "source":
+        return _format_source_results(results)
+    if mode == "wms":
+        return _format_wms_results(results)
+    return _format_code_results(results)
+
+
+def _format_code_results(results: list[dict]) -> str:
+    sections: list[str] = []
+    for result in results:
+        code = str(result.get("code") or "")
+        if result.get("error"):
+            sections.append(f"物流码：{code}\n查询失败：{result.get('error')}")
+            continue
+        rows = result.get("rows") or []
+        if not result.get("found") or not rows:
+            sections.append(f"物流码：{code}\n未查询到结果")
+            continue
+        for index, row in enumerate(rows, start=1):
+            title = f"物流码：{code}" if len(rows) == 1 else f"物流码：{code}（结果 {index}）"
+            sections.append(
+                "\n".join(
+                    [
+                        title,
+                        f"仓库：{row.get('warehouse') or ''}",
+                        f"渠道：{row.get('channel') or ''}",
+                        f"产品编码：{row.get('productCode') or ''}",
+                        f"产品名称：{row.get('productName') or ''}",
+                        f"出库时间：{row.get('outboundTime') or ''}",
+                        f"来源单号：{row.get('sourceOrderNo') or ''}",
+                        f"WMS配货单号：{row.get('wmsPickingNo') or ''}",
+                        f"备注：{row.get('remark') or ''}",
+                    ]
+                )
+            )
+    return "\n\n".join(sections)
+
+
+def _format_source_results(results: list[dict]) -> str:
+    sections: list[str] = []
+    for result in results:
+        source = str(result.get("source") or "")
+        if result.get("error"):
+            sections.append(f"来源单号：{source}\n查询失败：{result.get('error')}")
+            continue
+        codes = [str(code) for code in result.get("logisticsCodes", []) if code]
+        if not result.get("found") or not codes:
+            sections.append(f"来源单号：{source}\n未查询到结果")
+            continue
+        sections.append("\n".join([f"来源单号：{source}", f"共 {len(codes)} 个物流码", *codes]))
+    return "\n\n".join(sections)
+
+
+def _format_wms_results(results: list[dict]) -> str:
+    sections: list[str] = []
+    for result in results:
+        wms_order = str(result.get("wmsOrder") or "")
+        if result.get("error"):
+            sections.append(f"WMS配货单号：{wms_order}\n查询失败：{result.get('error')}")
+            continue
+        codes = [str(code) for code in result.get("logisticsCodes", []) if code]
+        if not result.get("found") or not codes:
+            sections.append(f"WMS配货单号：{wms_order}\n未查询到结果")
+            continue
+        sections.append("\n".join([f"WMS配货单号：{wms_order}", f"共 {len(codes)} 个物流码", *codes]))
+    return "\n\n".join(sections)

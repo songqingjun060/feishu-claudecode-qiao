@@ -195,6 +195,7 @@ class Bridge:
         self._recent_audio_by_chat: dict[str, dict[str, Any]] = {}
         self._recent_files_by_chat: dict[str, dict[str, Any]] = {}
         self._last_claude_run_meta: dict[str, Any] = {}
+        self._recent_bi_results_by_chat: dict[str, dict[str, Any]] = {}
         self._whisper_model: Any | None = None
         self._whisper_model_name: str | None = None
         self._whisper_load_policy = (config.whisper_load_policy or "lazy").lower()
@@ -619,6 +620,201 @@ class Bridge:
                     "created_at": time.time(),
                     "uploaded": False,
                 }
+
+    def _cache_recent_bi_result(
+        self,
+        chat_id: str,
+        reply_text: str,
+        *,
+        file_path: str = "",
+        uploaded: bool = False,
+    ) -> None:
+        if not chat_id or not reply_text:
+            return
+        with self._state_lock:
+            self._recent_bi_results_by_chat[chat_id] = {
+                "reply_text": reply_text,
+                "file_path": file_path,
+                "uploaded": uploaded,
+                "created_at": time.time(),
+            }
+
+    def _is_recent_bi_result_intent(self, content: str) -> bool:
+        text = content.lower().strip()
+        result_words = (
+            "\u7ed3\u679c",
+            "\u660e\u7ec6",
+            "\u67e5\u8be2\u7ed3\u679c",
+            "\u521a\u624d",
+            "\u9644\u4ef6",
+            "result",
+            "detail",
+        )
+        return any(word in text for word in result_words)
+
+    def _try_reply_recent_bi_result(
+        self,
+        *,
+        chat_id: str,
+        chat_type: str,
+        msg_id: str,
+        sender: str,
+        sender_name: str,
+        content: str,
+        effective_security: SecurityPolicy,
+    ) -> bool:
+        if not self._is_recent_bi_result_intent(content):
+            return False
+        with self._state_lock:
+            recent = self._recent_bi_results_by_chat.get(chat_id)
+        if not recent:
+            return False
+        if time.time() - float(recent.get("created_at", 0)) > 1800:
+            with self._state_lock:
+                self._recent_bi_results_by_chat.pop(chat_id, None)
+            return False
+        file_path = str(recent.get("file_path") or "")
+        wants_file = any(word in content.lower() for word in ("\u9644\u4ef6", "\u6587\u4ef6", "\u8868\u683c", "excel", "xlsx", "file"))
+        if wants_file and file_path:
+            path = Path(file_path).expanduser().resolve()
+            if path.is_file() and effective_security.explain_path(path).allowed:
+                uploaded = self._send_local_file(
+                    chat_id,
+                    str(path),
+                    reply_to_message_id=msg_id if chat_type == "group" else "",
+                )
+                if uploaded:
+                    self._send_event_reply(
+                        chat_id,
+                        f"已上传刚才的 BI 查询附件：{path.name}",
+                        "text",
+                        chat_type,
+                        msg_id,
+                        sender,
+                        sender_name,
+                    )
+                    return True
+        self._send_event_reply(
+            chat_id,
+            str(recent.get("reply_text") or "刚才的 BI 查询没有可用结果。"),
+            "text",
+            chat_type,
+            msg_id,
+            sender,
+            sender_name,
+        )
+        return True
+
+    def _ensure_bi_result_attachment(self, result: Any) -> str:
+        if getattr(result, "excel_path", ""):
+            return str(result.excel_path)
+        raw_output = str(getattr(result, "raw_output", "") or "")
+        if not raw_output.strip():
+            return ""
+        try:
+            payload = json.loads(raw_output)
+        except json.JSONDecodeError:
+            return ""
+        try:
+            return self._write_bi_result_excel(payload)
+        except Exception as exc:
+            self.bridge_logger.warning(f"Failed to create BI result attachment: {exc}")
+            return ""
+
+    def _write_bi_result_excel(self, payload: dict[str, Any]) -> str:
+        try:
+            from openpyxl import Workbook
+        except ImportError as exc:
+            raise RuntimeError("openpyxl is not installed") from exc
+
+        rows = self._bi_payload_rows(payload)
+        if not rows:
+            return ""
+
+        out_dir = self.data_dir / "generated"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        file_path = out_dir / f"BI物流码查询结果-{timestamp}.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "查询结果"
+        headers = list(rows[0].keys())
+        sheet.append(headers)
+        for row in rows:
+            sheet.append([row.get(header, "") for header in headers])
+        workbook.save(file_path)
+        return str(file_path)
+
+    def _bi_payload_rows(self, payload: dict[str, Any]) -> list[dict[str, str]]:
+        mode = str(payload.get("mode") or "code")
+        results = payload.get("results") or []
+        if mode == "source":
+            return self._bi_source_payload_rows(results)
+        if mode == "wms":
+            return self._bi_wms_payload_rows(results)
+        return self._bi_code_payload_rows(results)
+
+    def _bi_code_payload_rows(self, results: list[dict[str, Any]]) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for result in results:
+            code = str(result.get("code") or "")
+            detail_rows = result.get("rows") or []
+            if result.get("found") and detail_rows:
+                for row in detail_rows:
+                    rows.append(
+                        {
+                            "物流码": code,
+                            "是否查询到": "是",
+                            "仓库": str(row.get("warehouse") or ""),
+                            "渠道": str(row.get("channel") or ""),
+                            "产品编码": str(row.get("productCode") or ""),
+                            "产品名称": str(row.get("productName") or ""),
+                            "出库时间": str(row.get("outboundTime") or ""),
+                            "来源单号": str(row.get("sourceOrderNo") or ""),
+                            "WMS配货单号": str(row.get("wmsPickingNo") or ""),
+                            "备注": str(row.get("remark") or ""),
+                            "错误信息": str(result.get("error") or ""),
+                        }
+                    )
+                continue
+            rows.append(
+                {
+                    "物流码": code,
+                    "是否查询到": "否",
+                    "仓库": "",
+                    "渠道": "",
+                    "产品编码": "",
+                    "产品名称": "",
+                    "出库时间": "",
+                    "来源单号": "",
+                    "WMS配货单号": "",
+                    "备注": "",
+                    "错误信息": str(result.get("error") or ""),
+                }
+            )
+        return rows
+
+    def _bi_source_payload_rows(self, results: list[dict[str, Any]]) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for result in results:
+            source = str(result.get("source") or "")
+            codes = [str(code) for code in result.get("logisticsCodes", []) if code]
+            if result.get("found") and codes:
+                rows.extend({"来源单号": source, "物流码": code, "是否查询到": "是", "错误信息": ""} for code in codes)
+            else:
+                rows.append({"来源单号": source, "物流码": "", "是否查询到": "否", "错误信息": str(result.get("error") or "")})
+        return rows
+
+    def _bi_wms_payload_rows(self, results: list[dict[str, Any]]) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for result in results:
+            wms_order = str(result.get("wmsOrder") or "")
+            codes = [str(code) for code in result.get("logisticsCodes", []) if code]
+            if result.get("found") and codes:
+                rows.extend({"WMS配货单号": wms_order, "物流码": code, "是否查询到": "是", "错误信息": ""} for code in codes)
+            else:
+                rows.append({"WMS配货单号": wms_order, "物流码": "", "是否查询到": "否", "错误信息": str(result.get("error") or "")})
+        return rows
 
     def _file_candidates_from_text(
         self,
@@ -1195,8 +1391,9 @@ class Bridge:
 
         uploaded = False
         reply_text = result.summary or "BI 物流码查询完成。"
-        if result.excel_path:
-            path = Path(result.excel_path).expanduser().resolve()
+        attachment_path = self._ensure_bi_result_attachment(result)
+        if attachment_path:
+            path = Path(attachment_path).expanduser().resolve()
             if path.is_file() and effective_security.explain_path(path).allowed:
                 uploaded = self._send_local_file(
                     chat_id,
@@ -1206,6 +1403,7 @@ class Bridge:
                 if uploaded:
                     self._cache_recent_file_path(chat_id, str(path), uploaded=True)
                     reply_text = f"{reply_text}\n已上传文件：{path.name}"
+                    attachment_path = str(path)
         self._send_event_reply(
             chat_id,
             reply_text,
@@ -1221,7 +1419,13 @@ class Bridge:
             sender=sender,
             task_kind=match.task_kind,
             uploaded=uploaded,
-            excel_path=result.excel_path,
+            excel_path=attachment_path,
+        )
+        self._cache_recent_bi_result(
+            chat_id,
+            reply_text,
+            file_path=attachment_path,
+            uploaded=uploaded,
         )
         return True
 
@@ -1972,6 +2176,17 @@ class Bridge:
         if cmd.is_command:
             command_reply = self._handle_command(cmd, effective_rule, session_key, chat_id, sender, sender_name, chat_rule, chat_type)
             self._send_event_reply(chat_id, command_reply, "text", chat_type, msg_id, sender, sender_name)
+            return
+
+        if self._try_reply_recent_bi_result(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            msg_id=msg_id,
+            sender=sender,
+            sender_name=sender_name,
+            content=content,
+            effective_security=effective_security,
+        ):
             return
 
         if self.config.bridge_fast_tasks_enabled and self._try_handle_fast_task(

@@ -21,6 +21,43 @@ def test_parse_bi_output_extracts_excel_path():
     assert result.excel_path.endswith("物流码查询结果.xlsx")
 
 
+def test_parse_bi_output_includes_single_record_details():
+    payload = {
+        "success": True,
+        "total": 1,
+        "mode": "code",
+        "results": [
+            {
+                "code": "26021312404478",
+                "found": True,
+                "rows": [
+                    {
+                        "warehouse": "上海仓",
+                        "channel": "天猫",
+                        "productCode": "BJGJ107",
+                        "productName": "古井贡酒经典45度500ml",
+                        "outboundTime": "2026-06-17",
+                        "sourceOrderNo": "Q202606160035-6/8",
+                        "wmsPickingNo": "WD2606160000190",
+                        "remark": "天猫-华东嘉兴集货仓-整箱",
+                    }
+                ],
+            }
+        ],
+    }
+
+    result = parse_bi_output(json.dumps(payload, ensure_ascii=False))
+
+    assert result.ok is True
+    assert "物流码：26021312404478" in result.summary
+    assert "仓库：上海仓" in result.summary
+    assert "渠道：天猫" in result.summary
+    assert "产品名称：古井贡酒经典45度500ml" in result.summary
+    assert "来源单号：Q202606160035-6/8" in result.summary
+    assert "WMS配货单号：WD2606160000190" in result.summary
+    assert "备注：天猫-华东嘉兴集货仓-整箱" in result.summary
+
+
 def test_bi_runner_invokes_source_query(tmp_path, monkeypatch):
     calls = []
     tool_dir = tmp_path / "tool"
