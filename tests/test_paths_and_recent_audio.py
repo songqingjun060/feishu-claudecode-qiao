@@ -605,6 +605,59 @@ def test_local_tool_followup_analysis_injects_cached_result_for_claude(tmp_path,
     assert replies == [('{"text":"已分析"}', "text")]
 
 
+def test_local_tool_prompt_hint_is_added_for_file_or_image_extraction_intent(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.task_router import TaskRouter
+    from feishu_claudecode_qiao.tasks.local_tool import LocalToolConfig
+
+    tool = LocalToolConfig(
+        name="sample_lookup",
+        keywords=["查询"],
+        match_patterns=[r"\b[A-Z]{2}\d{4}\b"],
+        command=["sample.exe", "--ids", "{matches}"],
+        cwd="D:/tools/sample",
+        prompt_hint=(
+            "Extract all candidate codes from recent images or files, deduplicate them, "
+            "and call the tool once with every code. Do not query only the first code."
+        ),
+    )
+    bridge = make_bridge(tmp_path)
+    bridge.config = Config(
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
+        bridge_data_dir=str(tmp_path / "data"),
+        whisper_load_policy="lazy",
+        claude_work_dir=str(tmp_path),
+        security_allowed_paths=[str(tmp_path)],
+        bridge_fast_tasks_enabled=True,
+        bridge_local_tools=[tool],
+    )
+    bridge.task_router = TaskRouter([tool])
+    recent = tmp_path / "codes.png"
+    recent.write_text("fake image bytes", encoding="utf-8")
+    bridge._cache_recent_file_path("oc_1", str(recent))
+    prompts = []
+
+    monkeypatch.setattr(
+        bridge,
+        "_call_claude",
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("ok", "sid_1"),
+    )
+    monkeypatch.setattr(bridge, "_send_event_reply", lambda *args, **kwargs: True)
+
+    bridge._process_event_body(
+        make_event(
+            content_obj={"text": "@_user_1 查询这张图片里的编号"},
+            mentions=bot_mention(),
+        )
+    )
+
+    assert prompts
+    assert "<bridge_local_tool_hint>" in prompts[0]
+    assert "tool_name: sample_lookup" in prompts[0]
+    assert "command_template: sample.exe --ids {matches}" in prompts[0]
+    assert "Do not query only the first code." in prompts[0]
+
+
 def test_local_tool_fast_path_replies_error_without_calling_claude(tmp_path, monkeypatch):
     from feishu_claudecode_qiao.tasks.local_tool import LocalToolConfig, LocalToolResult
 

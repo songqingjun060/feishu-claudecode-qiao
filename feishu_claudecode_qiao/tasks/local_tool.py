@@ -21,6 +21,7 @@ class LocalToolConfig:
     )
     summary_fields: list[str] = field(default_factory=lambda: ["summary", "message", "text"])
     context_label: str = "local tool result"
+    prompt_hint: str = ""
 
 
 @dataclass(frozen=True)

@@ -1427,6 +1427,20 @@ class Bridge:
             content += self._file_tool_hint(path_str)
         return content
 
+    def _local_tool_prompt_context(self, content: str) -> str:
+        tools = self.task_router.intent_tools(content)
+        if not tools:
+            return ""
+        lines = ["", "", "<bridge_local_tool_hint>"]
+        for tool in tools:
+            command_template = " ".join(tool.command)
+            lines.append(f"- tool_name: {tool.name}")
+            lines.append(f"  cwd: {Path(tool.cwd).expanduser().resolve()}")
+            lines.append(f"  command_template: {command_template}")
+            lines.append(f"  instruction: {tool.prompt_hint}")
+        lines.append("</bridge_local_tool_hint>")
+        return "\n".join(lines)
+
     def _is_auto_upload_generated_table_intent(self, content: str) -> bool:
         text = content.lower()
         query_words = (
@@ -2209,6 +2223,10 @@ class Bridge:
         recent_local_tool_context = self._recent_local_tool_context(chat_id, content)
         if recent_local_tool_context:
             content += recent_local_tool_context
+
+        local_tool_prompt_context = self._local_tool_prompt_context(content)
+        if local_tool_prompt_context:
+            content += local_tool_prompt_context
 
         # Check rollover BEFORE getting session_id
         rollover_summary = ""

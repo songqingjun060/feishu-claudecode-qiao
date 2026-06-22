@@ -27,11 +27,18 @@ class TaskRouter:
     def match(self, content: str, context: TaskContext) -> TaskMatch | None:
         return self._match_local_tool(content, context)
 
+    def intent_tools(self, content: str) -> list[LocalToolConfig]:
+        text = content.strip()
+        return [
+            tool
+            for tool in self.local_tools
+            if tool.prompt_hint and _keyword_matches(tool, text)
+        ]
+
     def _match_local_tool(self, content: str, context: TaskContext) -> TaskMatch | None:
         text = content.strip()
-        lowered = text.lower()
         for tool in self.local_tools:
-            if tool.keywords and not any(keyword.lower() in lowered for keyword in tool.keywords):
+            if not _keyword_matches(tool, text):
                 continue
             matches: list[str] = []
             for pattern in tool.match_patterns:
@@ -58,6 +65,13 @@ def _unique(values: list[str]) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _keyword_matches(tool: LocalToolConfig, text: str) -> bool:
+    if not tool.keywords:
+        return True
+    lowered = text.lower()
+    return any(keyword.lower() in lowered for keyword in tool.keywords)
 
 
 def _flatten_match(value) -> str:

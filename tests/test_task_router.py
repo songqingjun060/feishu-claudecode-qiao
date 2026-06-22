@@ -37,6 +37,20 @@ def test_task_router_ignores_unconfigured_plain_number():
     assert result is None
 
 
+def test_task_router_returns_intent_tool_without_direct_matches():
+    tool = LocalToolConfig(
+        name="sample_lookup",
+        keywords=["查询"],
+        match_patterns=[r"\b[A-Z]{2}\d{4}\b"],
+        command=["sample.exe", "{matches}"],
+        prompt_hint="Extract every code from recent images or files, then call this tool.",
+    )
+
+    result = TaskRouter([tool]).intent_tools("帮我查询图片里的编号")
+
+    assert result == [tool]
+
+
 def test_task_router_without_tools_matches_nothing():
     result = TaskRouter().match(
         "查询 AB1234",

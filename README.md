@@ -94,7 +94,10 @@ timeout_seconds = 180
 summary_fields = ["summary", "message", "text"]
 attachment_path_fields = ["attachment_path", "file_path", "excelFilePath", "excel_path"]
 context_label = "sample lookup result"
+prompt_hint = "When the user asks to extract IDs from recent images or files, read the media/file context, extract all IDs, deduplicate them, run command_template once with every ID, and upload any returned attachment path."
 ```
+
+`prompt_hint` 是可选字段：当消息只有工具意图但没有直接命中 `match_patterns`（例如用户发图片后说“查图里的编号”）时，桥会把这个提示、`cwd` 和 `command_template` 注入给 Claude Code；已经直接命中正则的文本消息仍然走桥的快速路径，不绕 Claude。
 
 重要说明：
 

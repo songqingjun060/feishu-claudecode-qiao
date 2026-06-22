@@ -205,6 +205,7 @@ def _load_local_tools(data: Any) -> list[LocalToolConfig]:
                 attachment_path_fields=[str(value) for value in item.get("attachment_path_fields", ["attachment_path", "file_path", "excelFilePath", "excel_path"])],
                 summary_fields=[str(value) for value in item.get("summary_fields", ["summary", "message", "text"])],
                 context_label=str(item.get("context_label", "local tool result")),
+                prompt_hint=str(item.get("prompt_hint", "")),
             )
         )
     return tools

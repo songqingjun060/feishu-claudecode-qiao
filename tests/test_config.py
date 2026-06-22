@@ -75,6 +75,7 @@ command = ["sample.exe", "--ids", "{matches}"]
 cwd = "D:/tools/sample"
 timeout_seconds = 30
 context_label = "sample lookup"
+prompt_hint = "Extract every code from recent images or files, then call this tool."
 """.strip(),
         encoding="utf-8",
     )
@@ -99,3 +100,4 @@ context_label = "sample lookup"
     assert tool.cwd == "D:/tools/sample"
     assert tool.timeout_seconds == 30
     assert tool.context_label == "sample lookup"
+    assert tool.prompt_hint == "Extract every code from recent images or files, then call this tool."
