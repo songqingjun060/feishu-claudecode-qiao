@@ -1,4 +1,5 @@
 import json
+import builtins
 import subprocess
 import sys
 import types
@@ -114,6 +115,23 @@ def test_run_claude_persistent_prints_thinking_banner(tmp_path, capsys):
     assert reply == "ok"
     assert session_id == "sid_new"
     assert "🧠 Claude 思考中..." in capsys.readouterr().out
+
+
+def test_emit_console_downgrades_unprintable_emoji_without_failing_message(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path, bridge_console_claude_stream=True)
+    printed = []
+
+    def fake_print(text, *args, **kwargs):
+        if "🧠" in text:
+            raise UnicodeEncodeError("gbk", text, 0, 1, "illegal multibyte sequence")
+        printed.append(text)
+
+    monkeypatch.setattr(builtins, "print", fake_print)
+
+    bridge._emit_console("🧠 Claude 思考中...")
+
+    assert printed == ["? Claude 思考中..."]
+    assert bridge.config.bridge_console_claude_stream is True
 
 
 def test_call_claude_uses_result_when_stream_is_empty(tmp_path, monkeypatch):

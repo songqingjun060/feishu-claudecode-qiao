@@ -3306,6 +3306,19 @@ Rules:
         if self.config.bridge_console_claude_stream:
             try:
                 print(text, end=end, flush=True)
+            except UnicodeEncodeError as exc:
+                encoding = exc.encoding or getattr(sys.stdout, "encoding", None) or "utf-8"
+                safe_text = text.encode(
+                    encoding,
+                    errors="replace",
+                ).decode(encoding, errors="replace")
+                try:
+                    print(safe_text, end=end, flush=True)
+                except OSError as fallback_exc:
+                    self.bridge_logger.warning(
+                        f"Console stream disabled after output error: {fallback_exc or exc}"
+                    )
+                    object.__setattr__(self.config, "bridge_console_claude_stream", False)
             except OSError as exc:
                 self.bridge_logger.warning(f"Console stream disabled after output error: {exc}")
                 object.__setattr__(self.config, "bridge_console_claude_stream", False)
