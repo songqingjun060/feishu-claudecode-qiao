@@ -436,9 +436,16 @@ def test_bi_query_generated_excel_is_uploaded_immediately(tmp_path, monkeypatch)
     assert replies == [("\u67e5\u8be2\u5b8c\u6210\uff0c\u5df2\u4e0a\u4f20\u6587\u4ef6\uff1abi-result.xlsx", "text")]
 
 
-def test_bi_query_fast_path_uploads_without_calling_claude(tmp_path, monkeypatch):
-    from feishu_claudecode_qiao.tasks.bi_logistics import BiLogisticsResult
+def test_local_tool_fast_path_uploads_without_calling_claude(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.tasks.local_tool import LocalToolConfig, LocalToolResult
 
+    tool = LocalToolConfig(
+        name="sample_lookup",
+        keywords=["查询"],
+        match_patterns=[r"\b[A-Z]{2}\d{4}\b"],
+        command=["sample.exe", "{matches}"],
+        context_label="sample lookup",
+    )
     bridge = make_bridge(tmp_path)
     bridge.config = Config(
         feishu_app_id="cli_test",
@@ -447,8 +454,10 @@ def test_bi_query_fast_path_uploads_without_calling_claude(tmp_path, monkeypatch
         claude_work_dir=str(tmp_path),
         security_allowed_paths=[str(tmp_path)],
         bridge_fast_tasks_enabled=True,
+        bridge_local_tools=[tool],
     )
-    target = tmp_path / "bi-fast.xlsx"
+    bridge.task_router.local_tools = [tool]
+    target = tmp_path / "tool-result.xlsx"
     target.write_text("xlsx", encoding="utf-8")
     sent_files = []
     replies = []
@@ -457,18 +466,19 @@ def test_bi_query_fast_path_uploads_without_calling_claude(tmp_path, monkeypatch
     class FakeRunner:
         def run(self, request):
             requests.append(request)
-            return BiLogisticsResult(
+            return LocalToolResult(
                 ok=True,
-                summary="BI 物流码查询完成：共 1 条。",
-                excel_path=str(target),
+                tool_name="sample_lookup",
+                summary="查询完成，共 1 条",
+                attachment_path=str(target),
             )
 
-    bridge.bi_logistics_runner = FakeRunner()
+    bridge.local_tool_runner = FakeRunner()
     monkeypatch.setattr(
         bridge,
         "_call_claude",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("BI 快速路径命中后不应调用 Claude")
+            AssertionError("本地工具快速路径不应调用 Claude")
         ),
     )
     monkeypatch.setattr(
@@ -490,121 +500,17 @@ def test_bi_query_fast_path_uploads_without_calling_claude(tmp_path, monkeypatch
 
     bridge._process_event_body(
         make_event(
-            content_obj={"text": "@_user_1 Q202605270017-5/7 查询BI物流码"},
+            content_obj={"text": "@_user_1 查询 AB1234"},
             mentions=bot_mention(),
         )
     )
 
-    assert requests[0].sources == ["Q202605270017-5/7"]
+    assert requests[0].matches == ["AB1234"]
     assert sent_files == [("oc_1", str(target), "om_1")]
-    assert replies == [("BI 物流码查询完成：共 1 条。\n已上传文件：bi-fast.xlsx", "text")]
+    assert replies == [("查询完成，共 1 条\n已上传文件：tool-result.xlsx", "text")]
 
 
-def test_bi_query_fast_path_uploads_generated_attachment_and_remembers_result(tmp_path, monkeypatch):
-    from feishu_claudecode_qiao.tasks.bi_logistics import BiLogisticsResult
-
-    bridge = make_bridge(tmp_path)
-    bridge.config = Config(
-        feishu_app_id="cli_test",
-        feishu_app_secret="secret",
-        bridge_data_dir=str(tmp_path / "data"),
-        claude_work_dir=str(tmp_path),
-        security_allowed_paths=[str(tmp_path)],
-        bridge_fast_tasks_enabled=True,
-    )
-    sent_files = []
-    replies = []
-
-    raw_output = json.dumps(
-        {
-            "success": True,
-            "total": 1,
-            "mode": "code",
-            "results": [
-                {
-                    "code": "26021312404478",
-                    "found": True,
-                    "rows": [
-                        {
-                            "warehouse": "上海仓",
-                            "channel": "天猫",
-                            "productCode": "BJGJ107",
-                            "productName": "古井贡酒经典45度500ml",
-                            "outboundTime": "2026-06-17",
-                            "sourceOrderNo": "Q202606160035-6/8",
-                            "wmsPickingNo": "WD2606160000190",
-                            "remark": "天猫-华东嘉兴集货仓-整箱",
-                        }
-                    ],
-                }
-            ],
-        },
-        ensure_ascii=False,
-    )
-
-    class FakeRunner:
-        def run(self, request):
-            return BiLogisticsResult(
-                ok=True,
-                summary=(
-                    "BI 物流码查询完成：模式 code，共 1 条，查询到 1 条。\n\n"
-                    "物流码：26021312404478\n"
-                    "仓库：上海仓\n"
-                    "渠道：天猫\n"
-                    "产品编码：BJGJ107\n"
-                    "产品名称：古井贡酒经典45度500ml\n"
-                    "出库时间：2026-06-17\n"
-                    "来源单号：Q202606160035-6/8\n"
-                    "WMS配货单号：WD2606160000190\n"
-                    "备注：天猫-华东嘉兴集货仓-整箱"
-                ),
-                raw_output=raw_output,
-            )
-
-    bridge.bi_logistics_runner = FakeRunner()
-    monkeypatch.setattr(
-        bridge,
-        "_call_claude",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("BI 快速路径命中后不应调用 Claude")
-        ),
-    )
-    monkeypatch.setattr(
-        bridge,
-        "_send_local_file",
-        lambda chat_id, path, reply_to_message_id="": sent_files.append(
-            (chat_id, path, reply_to_message_id)
-        )
-        or True,
-    )
-    monkeypatch.setattr(
-        bridge,
-        "_send_event_reply",
-        lambda chat_id, content, msg_type, chat_type, msg_id, sender, sender_name: replies.append(
-            (content, msg_type)
-        )
-        or True,
-    )
-
-    bridge._process_event_body(
-        make_event(
-            content_obj={"text": "@_user_1 查询物流码 26021312404478"},
-            mentions=bot_mention(),
-            message_id="om_bi",
-        )
-    )
-
-    assert len(sent_files) == 1
-    assert sent_files[0][0] == "oc_1"
-    assert sent_files[0][2] == "om_bi"
-    assert sent_files[0][1].endswith(".xlsx")
-    assert "物流码：26021312404478" in replies[0][0]
-    assert "产品名称：古井贡酒经典45度500ml" in replies[0][0]
-    assert "已上传文件：" in replies[0][0]
-    assert bridge._recent_bi_results_by_chat["oc_1"]["reply_text"] == replies[0][0]
-
-
-def test_bi_query_followup_result_uses_cached_fast_task_without_claude(tmp_path, monkeypatch):
+def test_local_tool_followup_result_uses_cached_fast_task_without_claude(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     bridge.config = Config(
         feishu_app_id="cli_test",
@@ -615,13 +521,19 @@ def test_bi_query_followup_result_uses_cached_fast_task_without_claude(tmp_path,
         bridge_fast_tasks_enabled=True,
     )
     replies = []
-    bridge._cache_recent_bi_result("oc_1", "BI 明细结果", file_path="D:/result.xlsx")
+    bridge._cache_recent_local_tool_result(
+        "oc_1",
+        "查询完成，共 1 条",
+        tool_name="sample_lookup",
+        context_label="sample lookup",
+        file_path="D:/result.xlsx",
+    )
 
     monkeypatch.setattr(
         bridge,
         "_call_claude",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("BI 结果追问不应调用 Claude")
+            AssertionError("直接取最近本地工具结果不应调用 Claude")
         ),
     )
     monkeypatch.setattr(
@@ -641,10 +553,10 @@ def test_bi_query_followup_result_uses_cached_fast_task_without_claude(tmp_path,
         )
     )
 
-    assert replies == [("BI 明细结果", "text")]
+    assert replies == [("查询完成，共 1 条", "text")]
 
 
-def test_bi_query_followup_analysis_injects_cached_result_for_claude(tmp_path, monkeypatch):
+def test_local_tool_followup_analysis_injects_cached_result_for_claude(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     bridge.config = Config(
         feishu_app_id="cli_test",
@@ -656,16 +568,18 @@ def test_bi_query_followup_analysis_injects_cached_result_for_claude(tmp_path, m
     )
     prompts = []
     replies = []
-    bridge._cache_recent_bi_result(
+    bridge._cache_recent_local_tool_result(
         "oc_1",
-        "BI 明细结果\n物流码：26021312404478\n产品名称：古井贡酒经典45度500ml",
+        "查询完成，共 1 条\n编号：AB1234\n状态正常",
+        tool_name="sample_lookup",
+        context_label="sample lookup",
         file_path="D:/result.xlsx",
     )
 
     monkeypatch.setattr(
         bridge,
         "_call_claude",
-        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("分析完成", "sid_1"),
+        lambda prompt, *args, **kwargs: prompts.append(prompt) or ("已分析", "sid_1"),
     )
     monkeypatch.setattr(
         bridge,
@@ -685,15 +599,21 @@ def test_bi_query_followup_analysis_injects_cached_result_for_claude(tmp_path, m
     )
 
     assert len(prompts) == 1
-    assert "<bridge_recent_bi_result>" in prompts[0]
-    assert "物流码：26021312404478" in prompts[0]
-    assert "产品名称：古井贡酒经典45度500ml" in prompts[0]
-    assert replies == [('{"text":"分析完成"}', "text")]
+    assert "<bridge_recent_local_tool_result>" in prompts[0]
+    assert "tool_name: sample_lookup" in prompts[0]
+    assert "编号：AB1234" in prompts[0]
+    assert replies == [('{"text":"已分析"}', "text")]
 
 
-def test_bi_query_fast_path_replies_error_without_calling_claude(tmp_path, monkeypatch):
-    from feishu_claudecode_qiao.tasks.bi_logistics import BiLogisticsResult
+def test_local_tool_fast_path_replies_error_without_calling_claude(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.tasks.local_tool import LocalToolConfig, LocalToolResult
 
+    tool = LocalToolConfig(
+        name="sample_lookup",
+        keywords=["查询"],
+        match_patterns=[r"\b[A-Z]{2}\d{4}\b"],
+        command=["sample.exe", "{matches}"],
+    )
     bridge = make_bridge(tmp_path)
     bridge.config = Config(
         feishu_app_id="cli_test",
@@ -701,19 +621,21 @@ def test_bi_query_fast_path_replies_error_without_calling_claude(tmp_path, monke
         bridge_data_dir=str(tmp_path / "data"),
         claude_work_dir=str(tmp_path),
         bridge_fast_tasks_enabled=True,
+        bridge_local_tools=[tool],
     )
+    bridge.task_router.local_tools = [tool]
     replies = []
 
     class FakeRunner:
         def run(self, request):
-            return BiLogisticsResult(ok=False, error="BI 查询工具超时（180 秒）：26021312404478")
+            return LocalToolResult(ok=False, tool_name="sample_lookup", error="本地工具超时（180 秒）：sample_lookup")
 
-    bridge.bi_logistics_runner = FakeRunner()
+    bridge.local_tool_runner = FakeRunner()
     monkeypatch.setattr(
         bridge,
         "_call_claude",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("BI 快速路径失败也不应再调用 Claude")
+            AssertionError("本地工具失败也不应转给 Claude")
         ),
     )
     monkeypatch.setattr(
@@ -726,10 +648,10 @@ def test_bi_query_fast_path_replies_error_without_calling_claude(tmp_path, monke
     )
 
     bridge._process_event_body(
-        make_event(chat_type="p2p", content_obj={"text": "26021312404478 物流码查询"})
+        make_event(chat_type="p2p", content_obj={"text": "查询 AB1234"})
     )
 
-    assert replies == [("BI 查询失败：BI 查询工具超时（180 秒）：26021312404478", "text")]
+    assert replies == [("本地工具执行失败：本地工具超时（180 秒）：sample_lookup", "text")]
 
 
 def test_process_event_registers_active_run_while_calling_claude(tmp_path, monkeypatch):

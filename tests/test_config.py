@@ -14,7 +14,7 @@ def test_config_defaults():
     assert config.bridge_console_message_log is True
     assert config.bridge_console_claude_stream is True
     assert config.whisper_load_policy == "preload"
-    assert config.bridge_bi_logistics_tool_dir == "D:/BI-wuliumachaxun"
+    assert config.bridge_local_tools == []
 
 
 def test_config_from_env(monkeypatch):
@@ -23,7 +23,6 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setenv("FEISHUCLAUDECODE_FEISHU_EVENT_BACKEND", "lark_oapi_ws")
     monkeypatch.setenv("FEISHUCLAUDECODE_BRIDGE_CONSOLE_MESSAGE_LOG", "false")
     monkeypatch.setenv("FEISHUCLAUDECODE_BRIDGE_CONSOLE_CLAUDE_STREAM", "false")
-    monkeypatch.setenv("FEISHUCLAUDECODE_BRIDGE_BI_LOGISTICS_TOOL_DIR", "D:/custom-bi")
     monkeypatch.setenv("FEISHUCLAUDECODE_WHISPER_LOAD_POLICY", "per_call")
     config = load_config()
     assert config.feishu_app_id == "from_env"
@@ -31,7 +30,6 @@ def test_config_from_env(monkeypatch):
     assert config.feishu_event_backend == "lark_oapi_ws"
     assert config.bridge_console_message_log is False
     assert config.bridge_console_claude_stream is False
-    assert config.bridge_bi_logistics_tool_dir == "D:/custom-bi"
     assert config.whisper_load_policy == "per_call"
 
 
@@ -68,7 +66,15 @@ media_batch_window_seconds = 4
 text_coalesce_window_seconds = 1
 progress_cards = true
 fast_tasks_enabled = false
-bi_logistics_tool_dir = "D:/BI-wuliumachaxun-api"
+
+[[local_tools]]
+name = "sample_lookup"
+keywords = ["查询"]
+match_patterns = ["\\\\b[A-Z]{2}\\\\d{4}\\\\b"]
+command = ["sample.exe", "--ids", "{matches}"]
+cwd = "D:/tools/sample"
+timeout_seconds = 30
+context_label = "sample lookup"
 """.strip(),
         encoding="utf-8",
     )
@@ -84,4 +90,12 @@ bi_logistics_tool_dir = "D:/BI-wuliumachaxun-api"
     assert config.bridge_text_coalesce_window_seconds == 1
     assert config.bridge_progress_cards is True
     assert config.bridge_fast_tasks_enabled is False
-    assert config.bridge_bi_logistics_tool_dir == "D:/BI-wuliumachaxun-api"
+    assert len(config.bridge_local_tools) == 1
+    tool = config.bridge_local_tools[0]
+    assert tool.name == "sample_lookup"
+    assert tool.keywords == ["查询"]
+    assert tool.match_patterns == ["\\b[A-Z]{2}\\d{4}\\b"]
+    assert tool.command == ["sample.exe", "--ids", "{matches}"]
+    assert tool.cwd == "D:/tools/sample"
+    assert tool.timeout_seconds == 30
+    assert tool.context_label == "sample lookup"

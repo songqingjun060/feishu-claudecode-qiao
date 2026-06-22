@@ -80,6 +80,22 @@ allowed_paths = []
 blocked_keywords = []
 ```
 
+本地工具快速路径使用通用 `[[local_tools]]` 配置。桥只负责命中关键词/正则、执行本地命令、解析 stdout 和上传工具返回的附件路径；具体业务逻辑放在你自己的本地工具里，不需要提交到本项目。
+
+```toml
+[[local_tools]]
+name = "sample_lookup"
+enabled = true
+keywords = ["查询", "lookup"]
+match_patterns = ["\\b[A-Z]{2}\\d{4}\\b"]
+command = ["python", "lookup.py", "--ids", "{matches}"]
+cwd = "D:/your-local-tool"
+timeout_seconds = 180
+summary_fields = ["summary", "message", "text"]
+attachment_path_fields = ["attachment_path", "file_path", "excelFilePath", "excel_path"]
+context_label = "sample lookup result"
+```
+
 重要说明：
 
 - `oneshot` 是稳定默认：每条消息调用一次 Claude CLI，保留 `session_id` 做上下文延续。

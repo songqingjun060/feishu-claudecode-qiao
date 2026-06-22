@@ -5,7 +5,6 @@ description = "Feishu-Claude Bridge (Qiao Edition)"
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31.0",
-  "openpyxl>=3.1.0",
   "tomli>=2.0.0; python_version<'3.11'",
 ]
 

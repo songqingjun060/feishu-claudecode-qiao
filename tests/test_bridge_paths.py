@@ -9,12 +9,10 @@ from feishu_claudecode_qiao.config import Config
 
 def test_bridge_paths_use_configured_data_dir(tmp_path):
     data_dir = tmp_path / "custom-data"
-    bi_tool_dir = tmp_path / "bi-tool"
     config = Config(
         feishu_app_id="cli_test",
         feishu_app_secret="secret",
         bridge_data_dir=str(data_dir),
-        bridge_bi_logistics_tool_dir=str(bi_tool_dir),
     )
 
     bridge = Bridge(config)
@@ -25,7 +23,6 @@ def test_bridge_paths_use_configured_data_dir(tmp_path):
     assert bridge.ws_events_file == data_dir.resolve() / "logs" / "feishu_ws_events.jsonl"
     assert bridge.images_dir == data_dir.resolve() / "images"
     assert bridge.attachments_dir == data_dir.resolve() / "attachments"
-    assert bridge.bi_logistics_runner.tool_dir == bi_tool_dir.resolve()
 
 
 def test_websocket_watchdog_starts_subscriber_when_pid_missing(tmp_path, monkeypatch):

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .tasks.local_tool import LocalToolConfig
+
 
 @dataclass(frozen=True)
 class TaskContext:
@@ -15,44 +17,33 @@ class TaskMatch:
     task_kind: str
     confidence: float
     params: dict[str, list[str]]
+    tool: LocalToolConfig | None = None
 
 
 class TaskRouter:
-    def match(self, content: str, context: TaskContext) -> TaskMatch | None:
-        return self._match_bi_logistics(content, context)
+    def __init__(self, local_tools: list[LocalToolConfig] | None = None) -> None:
+        self.local_tools = [tool for tool in (local_tools or []) if tool.enabled]
 
-    def _match_bi_logistics(self, content: str, context: TaskContext) -> TaskMatch | None:
+    def match(self, content: str, context: TaskContext) -> TaskMatch | None:
+        return self._match_local_tool(content, context)
+
+    def _match_local_tool(self, content: str, context: TaskContext) -> TaskMatch | None:
         text = content.strip()
         lowered = text.lower()
-        bi_words = ("bi", "物流码", "wms", "配货单", "来源单")
-        query_words = ("查询", "查", "核对", "批量", "明细", "query", "search")
-        has_bi_intent = any(word in lowered for word in bi_words) and any(
-            word in lowered for word in query_words
-        )
-        if not has_bi_intent:
-            return None
-
-        sources = _unique(re.findall(r"\bQ\d{8,}[-/][0-9A-Za-z/-]+\b", text, re.IGNORECASE))
-        wms_orders = _unique(re.findall(r"\b(?:CK|RK)?\d{8,}[A-Za-z0-9/-]*\b", text, re.IGNORECASE))
-        codes = _unique(re.findall(r"\b\d{11,24}\b", text))
-
-        if sources:
+        for tool in self.local_tools:
+            if tool.keywords and not any(keyword.lower() in lowered for keyword in tool.keywords):
+                continue
+            matches: list[str] = []
+            for pattern in tool.match_patterns:
+                matches.extend(re.findall(pattern, text, re.IGNORECASE))
+            matches = _unique([_flatten_match(match) for match in matches])
+            if tool.match_patterns and not matches:
+                continue
             return TaskMatch(
-                task_kind="bi_logistics",
-                confidence=0.9,
-                params={"sources": sources, "codes": [], "wms_orders": []},
-            )
-        if codes:
-            return TaskMatch(
-                task_kind="bi_logistics",
+                task_kind="local_tool",
                 confidence=0.85,
-                params={"sources": [], "codes": codes, "wms_orders": []},
-            )
-        if wms_orders and "wms" in lowered:
-            return TaskMatch(
-                task_kind="bi_logistics",
-                confidence=0.8,
-                params={"sources": [], "codes": [], "wms_orders": wms_orders},
+                params={"matches": matches},
+                tool=tool,
             )
         return None
 
@@ -67,3 +58,9 @@ def _unique(values: list[str]) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _flatten_match(value) -> str:
+    if isinstance(value, tuple):
+        return next((str(item) for item in value if item), "")
+    return str(value)

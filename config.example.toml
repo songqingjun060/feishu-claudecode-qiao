@@ -9,8 +9,8 @@ event_backend = "start_ws"
 command = "claude"
 work_dir = "."
 permission_mode = "safe"
-# oneshot：每条消息调用一次 Claude CLI，最稳定。
-# persistent：SDK-backed 实验加速，为对话保留常驻 Claude worker；缺少 SDK 或 worker 出错时自动回退 oneshot。
+# oneshot: 每条消息调用一次 Claude CLI，最稳定。
+# persistent: SDK-backed 实验加速模式，为对话保留常驻 Claude worker；SDK 或 worker 出错时自动回退 oneshot。
 runner = "oneshot"
 worker_idle_ttl_seconds = 900
 max_workers = 3
@@ -19,8 +19,8 @@ persistent_enabled_chats = []
 
 [whisper]
 model = "base"
-# 默认在桥启动时预加载 Whisper，第一条语音不再承担模型冷启动。
-load_policy = "preload"  # preload / lazy / per_call
+# preload: 桥启动时加载 Whisper；lazy: 首次语音时加载；per_call: 每条语音临时加载。
+load_policy = "preload"
 
 [bridge]
 data_dir = "./data"
@@ -42,8 +42,6 @@ text_coalesce_window_seconds = 2
 message_coalesce_window_seconds = 10
 progress_cards = false
 fast_tasks_enabled = true
-# BI 物流码快速任务工具目录；默认指向支持 api.enabled 的接口直查版。
-bi_logistics_tool_dir = "D:/BI-wuliumachaxun"
 # 如果 bot_admins 为空，只有 bot_owner_id 能修改群规则。
 bot_owner_id = ""
 bot_admins = []
@@ -51,6 +49,22 @@ bot_admins = []
 [security]
 allowed_paths = []
 blocked_keywords = []
+
+# 本地工具快速路径示例：
+# 桥只负责按关键词/正则命中、执行本地命令、解析 stdout，并上传命令返回的附件路径。
+# 具体业务逻辑应放在你自己的本地工具里，不需要提交到这个桥项目。
+#
+# [[local_tools]]
+# name = "sample_lookup"
+# enabled = true
+# keywords = ["查询", "lookup"]
+# match_patterns = ["\\b[A-Z]{2}\\d{4}\\b"]
+# command = ["python", "lookup.py", "--ids", "{matches}", "--text", "{content}"]
+# cwd = "D:/your-local-tool"
+# timeout_seconds = 180
+# attachment_path_fields = ["attachment_path", "file_path", "excelFilePath", "excel_path"]
+# summary_fields = ["summary", "message", "text"]
+# context_label = "sample lookup result"
 
 # 会话翻页和长期记忆策略目前来自默认会话规则和按会话规则文件。
 # 当前全局配置加载器不会读取单独的 [context_policy] 或 [memory_policy] 表；

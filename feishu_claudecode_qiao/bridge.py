@@ -46,7 +46,7 @@ from .media_pipeline import MediaBatcher, MediaItem, RecentContext
 from .event_dispatcher import ChatEventDispatcher
 from .scheduler import ChatScheduler, QueuePolicy
 from .task_router import TaskContext, TaskRouter
-from .tasks.bi_logistics import BiLogisticsRequest, BiLogisticsRunner
+from .tasks.local_tool import LocalToolRequest, LocalToolRunner
 from .timing import RunTiming
 from .session_strategy import choose_session_strategy
 
@@ -182,8 +182,8 @@ class Bridge:
         self.recent_context = RecentContext()
         self.claude_runner = self._make_claude_runner()
         self.bridge_logger.info(f"Claude runner: {config.claude_runner or 'oneshot'}")
-        self.task_router = TaskRouter()
-        self.bi_logistics_runner = BiLogisticsRunner(config.bridge_bi_logistics_tool_dir)
+        self.task_router = TaskRouter(config.bridge_local_tools)
+        self.local_tool_runner = LocalToolRunner()
         self._state_lock = RLock()
         self._token_lock = RLock()
         self._token: str | None = None
@@ -195,7 +195,7 @@ class Bridge:
         self._recent_audio_by_chat: dict[str, dict[str, Any]] = {}
         self._recent_files_by_chat: dict[str, dict[str, Any]] = {}
         self._last_claude_run_meta: dict[str, Any] = {}
-        self._recent_bi_results_by_chat: dict[str, dict[str, Any]] = {}
+        self._recent_local_tool_results_by_chat: dict[str, dict[str, Any]] = {}
         self._whisper_model: Any | None = None
         self._whisper_model_name: str | None = None
         self._whisper_load_policy = (config.whisper_load_policy or "lazy").lower()
@@ -621,25 +621,29 @@ class Bridge:
                     "uploaded": False,
                 }
 
-    def _cache_recent_bi_result(
+    def _cache_recent_local_tool_result(
         self,
         chat_id: str,
         reply_text: str,
         *,
+        tool_name: str = "",
+        context_label: str = "local tool result",
         file_path: str = "",
         uploaded: bool = False,
     ) -> None:
         if not chat_id or not reply_text:
             return
         with self._state_lock:
-            self._recent_bi_results_by_chat[chat_id] = {
+            self._recent_local_tool_results_by_chat[chat_id] = {
                 "reply_text": reply_text,
+                "tool_name": tool_name,
+                "context_label": context_label,
                 "file_path": file_path,
                 "uploaded": uploaded,
                 "created_at": time.time(),
             }
 
-    def _is_recent_bi_result_intent(self, content: str) -> bool:
+    def _is_recent_local_tool_result_intent(self, content: str) -> bool:
         text = content.lower().strip()
         result_words = (
             "\u7ed3\u679c",
@@ -652,8 +656,8 @@ class Bridge:
         )
         return any(word in text for word in result_words)
 
-    def _is_recent_bi_analysis_intent(self, content: str) -> bool:
-        if not self._is_recent_bi_result_intent(content):
+    def _is_recent_local_tool_analysis_intent(self, content: str) -> bool:
+        if not self._is_recent_local_tool_result_intent(content):
             return False
         text = content.lower()
         analysis_words = (
@@ -676,7 +680,7 @@ class Bridge:
         )
         return any(word in text for word in analysis_words)
 
-    def _try_reply_recent_bi_result(
+    def _try_reply_recent_local_tool_result(
         self,
         *,
         chat_id: str,
@@ -687,17 +691,17 @@ class Bridge:
         content: str,
         effective_security: SecurityPolicy,
     ) -> bool:
-        if not self._is_recent_bi_result_intent(content):
+        if not self._is_recent_local_tool_result_intent(content):
             return False
-        if self._is_recent_bi_analysis_intent(content):
+        if self._is_recent_local_tool_analysis_intent(content):
             return False
         with self._state_lock:
-            recent = self._recent_bi_results_by_chat.get(chat_id)
+            recent = self._recent_local_tool_results_by_chat.get(chat_id)
         if not recent:
             return False
         if time.time() - float(recent.get("created_at", 0)) > 1800:
             with self._state_lock:
-                self._recent_bi_results_by_chat.pop(chat_id, None)
+                self._recent_local_tool_results_by_chat.pop(chat_id, None)
             return False
         file_path = str(recent.get("file_path") or "")
         wants_file = any(word in content.lower() for word in ("\u9644\u4ef6", "\u6587\u4ef6", "\u8868\u683c", "excel", "xlsx", "file"))
@@ -712,7 +716,7 @@ class Bridge:
                 if uploaded:
                     self._send_event_reply(
                         chat_id,
-                        f"已上传刚才的 BI 查询附件：{path.name}",
+                        f"已上传刚才的本地工具附件：{path.name}",
                         "text",
                         chat_type,
                         msg_id,
@@ -722,7 +726,7 @@ class Bridge:
                     return True
         self._send_event_reply(
             chat_id,
-            str(recent.get("reply_text") or "刚才的 BI 查询没有可用结果。"),
+            str(recent.get("reply_text") or "刚才的本地工具没有可用结果。"),
             "text",
             chat_type,
             msg_id,
@@ -731,143 +735,37 @@ class Bridge:
         )
         return True
 
-    def _recent_bi_context(self, chat_id: str, content: str) -> str:
+    def _recent_local_tool_context(self, chat_id: str, content: str) -> str:
         if not content.strip():
             return ""
         with self._state_lock:
-            recent = self._recent_bi_results_by_chat.get(chat_id)
+            recent = self._recent_local_tool_results_by_chat.get(chat_id)
         if not recent:
             return ""
         if time.time() - float(recent.get("created_at", 0)) > 1800:
             with self._state_lock:
-                self._recent_bi_results_by_chat.pop(chat_id, None)
+                self._recent_local_tool_results_by_chat.pop(chat_id, None)
             return ""
         reply_text = str(recent.get("reply_text") or "").strip()
         if not reply_text:
             return ""
+        context_label = str(recent.get("context_label") or "local tool result")
+        tool_name = str(recent.get("tool_name") or "")
         lines = [
-            "\n\n<bridge_recent_bi_result>",
-            "instruction: 这是当前聊天窗口最近一次 BI 查询的完整结果。用户如果要求基于刚才结果继续分析、整理或生成内容，请直接使用这里的结果，不要说找不到上下文。",
+            "\n\n<bridge_recent_local_tool_result>",
+            f"context_label: {context_label}",
+            "instruction: 这是当前聊天窗口最近一次本地工具调用结果。用户如果要求基于刚才结果继续分析、整理或生成内容，请直接使用这里的结果，不要说找不到上下文。",
         ]
+        if tool_name:
+            lines.append(f"tool_name: {tool_name}")
         file_path = str(recent.get("file_path") or "")
         if file_path:
             lines.append(f"file_path: {file_path}")
             lines.append(f"uploaded: {bool(recent.get('uploaded'))}")
         lines.append("result:")
         lines.append(reply_text)
-        lines.append("</bridge_recent_bi_result>")
+        lines.append("</bridge_recent_local_tool_result>")
         return "\n".join(lines)
-
-    def _ensure_bi_result_attachment(self, result: Any) -> str:
-        if getattr(result, "excel_path", ""):
-            return str(result.excel_path)
-        raw_output = str(getattr(result, "raw_output", "") or "")
-        if not raw_output.strip():
-            return ""
-        try:
-            payload = json.loads(raw_output)
-        except json.JSONDecodeError:
-            return ""
-        try:
-            return self._write_bi_result_excel(payload)
-        except Exception as exc:
-            self.bridge_logger.warning(f"Failed to create BI result attachment: {exc}")
-            return ""
-
-    def _write_bi_result_excel(self, payload: dict[str, Any]) -> str:
-        try:
-            from openpyxl import Workbook
-        except ImportError as exc:
-            raise RuntimeError("openpyxl is not installed") from exc
-
-        rows = self._bi_payload_rows(payload)
-        if not rows:
-            return ""
-
-        out_dir = self.data_dir / "generated"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        file_path = out_dir / f"BI物流码查询结果-{timestamp}.xlsx"
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = "查询结果"
-        headers = list(rows[0].keys())
-        sheet.append(headers)
-        for row in rows:
-            sheet.append([row.get(header, "") for header in headers])
-        workbook.save(file_path)
-        return str(file_path)
-
-    def _bi_payload_rows(self, payload: dict[str, Any]) -> list[dict[str, str]]:
-        mode = str(payload.get("mode") or "code")
-        results = payload.get("results") or []
-        if mode == "source":
-            return self._bi_source_payload_rows(results)
-        if mode == "wms":
-            return self._bi_wms_payload_rows(results)
-        return self._bi_code_payload_rows(results)
-
-    def _bi_code_payload_rows(self, results: list[dict[str, Any]]) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
-        for result in results:
-            code = str(result.get("code") or "")
-            detail_rows = result.get("rows") or []
-            if result.get("found") and detail_rows:
-                for row in detail_rows:
-                    rows.append(
-                        {
-                            "物流码": code,
-                            "是否查询到": "是",
-                            "仓库": str(row.get("warehouse") or ""),
-                            "渠道": str(row.get("channel") or ""),
-                            "产品编码": str(row.get("productCode") or ""),
-                            "产品名称": str(row.get("productName") or ""),
-                            "出库时间": str(row.get("outboundTime") or ""),
-                            "来源单号": str(row.get("sourceOrderNo") or ""),
-                            "WMS配货单号": str(row.get("wmsPickingNo") or ""),
-                            "备注": str(row.get("remark") or ""),
-                            "错误信息": str(result.get("error") or ""),
-                        }
-                    )
-                continue
-            rows.append(
-                {
-                    "物流码": code,
-                    "是否查询到": "否",
-                    "仓库": "",
-                    "渠道": "",
-                    "产品编码": "",
-                    "产品名称": "",
-                    "出库时间": "",
-                    "来源单号": "",
-                    "WMS配货单号": "",
-                    "备注": "",
-                    "错误信息": str(result.get("error") or ""),
-                }
-            )
-        return rows
-
-    def _bi_source_payload_rows(self, results: list[dict[str, Any]]) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
-        for result in results:
-            source = str(result.get("source") or "")
-            codes = [str(code) for code in result.get("logisticsCodes", []) if code]
-            if result.get("found") and codes:
-                rows.extend({"来源单号": source, "物流码": code, "是否查询到": "是", "错误信息": ""} for code in codes)
-            else:
-                rows.append({"来源单号": source, "物流码": "", "是否查询到": "否", "错误信息": str(result.get("error") or "")})
-        return rows
-
-    def _bi_wms_payload_rows(self, results: list[dict[str, Any]]) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
-        for result in results:
-            wms_order = str(result.get("wmsOrder") or "")
-            codes = [str(code) for code in result.get("logisticsCodes", []) if code]
-            if result.get("found") and codes:
-                rows.extend({"WMS配货单号": wms_order, "物流码": code, "是否查询到": "是", "错误信息": ""} for code in codes)
-            else:
-                rows.append({"WMS配货单号": wms_order, "物流码": "", "是否查询到": "否", "错误信息": str(result.get("error") or "")})
-        return rows
 
     def _file_candidates_from_text(
         self,
@@ -1407,7 +1305,7 @@ class Bridge:
         )
         if not match:
             return False
-        if match.task_kind != "bi_logistics":
+        if match.task_kind != "local_tool" or match.tool is None:
             return False
 
         self.audit.write(
@@ -1415,25 +1313,27 @@ class Bridge:
             chat_id=chat_id,
             sender=sender,
             task_kind=match.task_kind,
+            tool_name=match.tool.name,
             confidence=match.confidence,
         )
-        request = BiLogisticsRequest(
-            codes=match.params.get("codes", []),
-            sources=match.params.get("sources", []),
-            wms_orders=match.params.get("wms_orders", []),
+        request = LocalToolRequest(
+            tool=match.tool,
+            matches=match.params.get("matches", []),
+            content=content,
         )
-        result = self.bi_logistics_runner.run(request)
+        result = self.local_tool_runner.run(request)
         if not result.ok:
             self.audit.write(
                 "fast_task_failed",
                 chat_id=chat_id,
                 sender=sender,
                 task_kind=match.task_kind,
+                tool_name=match.tool.name,
                 error=result.error,
             )
             self._send_event_reply(
                 chat_id,
-                f"BI 查询失败：{result.error or '未知错误'}",
+                f"本地工具执行失败：{result.error or '未知错误'}",
                 "text",
                 chat_type,
                 msg_id,
@@ -1443,8 +1343,8 @@ class Bridge:
             return True
 
         uploaded = False
-        reply_text = result.summary or "BI 物流码查询完成。"
-        attachment_path = self._ensure_bi_result_attachment(result)
+        reply_text = result.summary or "本地工具执行完成。"
+        attachment_path = result.attachment_path
         if attachment_path:
             path = Path(attachment_path).expanduser().resolve()
             if path.is_file() and effective_security.explain_path(path).allowed:
@@ -1471,12 +1371,15 @@ class Bridge:
             chat_id=chat_id,
             sender=sender,
             task_kind=match.task_kind,
+            tool_name=match.tool.name,
             uploaded=uploaded,
-            excel_path=attachment_path,
+            attachment_path=attachment_path,
         )
-        self._cache_recent_bi_result(
+        self._cache_recent_local_tool_result(
             chat_id,
             reply_text,
+            tool_name=match.tool.name,
+            context_label=match.tool.context_label,
             file_path=attachment_path,
             uploaded=uploaded,
         )
@@ -2231,7 +2134,7 @@ class Bridge:
             self._send_event_reply(chat_id, command_reply, "text", chat_type, msg_id, sender, sender_name)
             return
 
-        if self._try_reply_recent_bi_result(
+        if self._try_reply_recent_local_tool_result(
             chat_id=chat_id,
             chat_type=chat_type,
             msg_id=msg_id,
@@ -2303,9 +2206,9 @@ class Bridge:
         if recent_file_context:
             content += recent_file_context
 
-        recent_bi_context = self._recent_bi_context(chat_id, content)
-        if recent_bi_context:
-            content += recent_bi_context
+        recent_local_tool_context = self._recent_local_tool_context(chat_id, content)
+        if recent_local_tool_context:
+            content += recent_local_tool_context
 
         # Check rollover BEFORE getting session_id
         rollover_summary = ""

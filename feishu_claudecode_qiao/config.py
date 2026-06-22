@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .tasks.local_tool import LocalToolConfig
+
 
 def _load_toml(path: Path) -> dict[str, Any]:
     try:
@@ -61,7 +63,7 @@ class Config:
     bridge_text_coalesce_window_seconds: int = 2
     bridge_progress_cards: bool = False
     bridge_fast_tasks_enabled: bool = True
-    bridge_bi_logistics_tool_dir: str = "D:/BI-wuliumachaxun"
+    bridge_local_tools: list[LocalToolConfig] = field(default_factory=list)
 
     # Security
     security_allowed_paths: list[str] = field(default_factory=list)
@@ -118,7 +120,7 @@ def _env_override(cfg: Config) -> Config:
         bridge_text_coalesce_window_seconds=_get("FEISHUCLAUDECODE_BRIDGE_TEXT_COALESCE_WINDOW_SECONDS", cfg.bridge_text_coalesce_window_seconds),
         bridge_progress_cards=_get("FEISHUCLAUDECODE_BRIDGE_PROGRESS_CARDS", cfg.bridge_progress_cards),
         bridge_fast_tasks_enabled=_get("FEISHUCLAUDECODE_BRIDGE_FAST_TASKS_ENABLED", cfg.bridge_fast_tasks_enabled),
-        bridge_bi_logistics_tool_dir=_get("FEISHUCLAUDECODE_BRIDGE_BI_LOGISTICS_TOOL_DIR", cfg.bridge_bi_logistics_tool_dir),
+        bridge_local_tools=cfg.bridge_local_tools,
         security_allowed_paths=_get("FEISHUCLAUDECODE_SECURITY_ALLOWED_PATHS", cfg.security_allowed_paths),
         security_blocked_keywords=_get("FEISHUCLAUDECODE_SECURITY_BLOCKED_KEYWORDS", cfg.security_blocked_keywords),
     )
@@ -173,9 +175,36 @@ def load_config(path: str | Path | None = None) -> Config:
             bridge_text_coalesce_window_seconds=data.get("bridge", {}).get("text_coalesce_window_seconds", 2),
             bridge_progress_cards=data.get("bridge", {}).get("progress_cards", False),
             bridge_fast_tasks_enabled=data.get("bridge", {}).get("fast_tasks_enabled", True),
-            bridge_bi_logistics_tool_dir=data.get("bridge", {}).get("bi_logistics_tool_dir", "D:/BI-wuliumachaxun"),
+            bridge_local_tools=_load_local_tools(data.get("local_tools", [])),
             security_allowed_paths=data.get("security", {}).get("allowed_paths", []),
             security_blocked_keywords=data.get("security", {}).get("blocked_keywords", []),
         )
 
     return _env_override(cfg)
+
+
+def _load_local_tools(data: Any) -> list[LocalToolConfig]:
+    if not isinstance(data, list):
+        return []
+    tools: list[LocalToolConfig] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        tools.append(
+            LocalToolConfig(
+                name=name,
+                enabled=bool(item.get("enabled", True)),
+                keywords=[str(value) for value in item.get("keywords", [])],
+                match_patterns=[str(value) for value in item.get("match_patterns", [])],
+                command=[str(value) for value in item.get("command", [])],
+                cwd=str(item.get("cwd", ".")),
+                timeout_seconds=int(item.get("timeout_seconds", 180)),
+                attachment_path_fields=[str(value) for value in item.get("attachment_path_fields", ["attachment_path", "file_path", "excelFilePath", "excel_path"])],
+                summary_fields=[str(value) for value in item.get("summary_fields", ["summary", "message", "text"])],
+                context_label=str(item.get("context_label", "local tool result")),
+            )
+        )
+    return tools
