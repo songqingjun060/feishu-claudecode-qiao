@@ -163,6 +163,29 @@ def test_context_decision_records_message_id(tmp_path, monkeypatch):
     assert decision["message_id"] == "om_audit"
 
 
+def test_whisper_preload_failure_does_not_abort_bridge_startup(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.bridge import Bridge
+    from feishu_claudecode_qiao.config import Config
+
+    class BrokenWhisperModel:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("model download failed")
+
+    monkeypatch.setattr("faster_whisper.WhisperModel", BrokenWhisperModel)
+
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+            whisper_model="large-v3-turbo",
+            whisper_load_policy="preload",
+        )
+    )
+
+    assert bridge._whisper_model is None
+
+
 def test_reaction_events_are_not_dispatched_as_messages(tmp_path, monkeypatch):
     from feishu_claudecode_qiao.bridge import Bridge
     from feishu_claudecode_qiao.config import Config

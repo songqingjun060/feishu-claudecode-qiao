@@ -3495,6 +3495,14 @@ Rules:
             )
             return model
         except ImportError:
+            self.bridge_logger.warning("faster-whisper is not installed; audio transcription disabled")
+            return None
+        except Exception as exc:
+            self.bridge_logger.warning(
+                "Whisper model '%s' failed to load: %s",
+                self.config.whisper_model,
+                exc,
+            )
             return None
 
     def _call_claude_with_recovery(
