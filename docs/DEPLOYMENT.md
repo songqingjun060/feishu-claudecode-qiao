@@ -1,4 +1,4 @@
-# 部署指南
+﻿# 部署指南
 
 本文用于干净的本地或团队部署。
 
@@ -118,13 +118,13 @@ python -m pytest -q
 
 ```powershell
 Set-Location -LiteralPath D:\feishu-claudecode-qiao
-.\start_all.ps1 -Restart
+.\run_foreground.ps1 -Restart
 ```
 
 如果明确需要隐藏后台运行：
 
 ```powershell
-.\start_all.ps1 -Restart -Background
+.\run_foreground.ps1 -Restart -Background
 ```
 
 桥和 WebSocket 订阅会按同一个 `config.toml`、`bridge.data_dir`、`bridge.ws_profile` 绑定。桥停止时会停止对应 WebSocket；桥重启时会重启对应 WebSocket；桥运行中发现对应 WebSocket 死掉会先自动拉起，连续恢复失败达到 `ws_max_restart_failures` 后桥才退出。
@@ -220,3 +220,4 @@ persistent_enabled_chats = []
 - 常驻模式不能替代长期记忆压缩。某个 Claude 会话上下文过大时，仍然需要使用会话翻页、摘要压缩或快速任务直通来降低 token。
 - 部署后可以在飞书发送 `/runtime` 查看当前 runner 和 worker 复用状态；发送 `/memory refresh` 可以手动压缩当前对话并刷新长期记忆。
 - 每个群或个人会话可以用 `/soul`、`/soul set role ...`、`/soul set tone ...` 设置独立角色，不会影响其他对话。
+

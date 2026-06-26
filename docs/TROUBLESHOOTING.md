@@ -1,4 +1,4 @@
-# 故障排查
+﻿# 故障排查
 
 本文记录常见部署问题、排查命令和已经验证过的处理方式。
 
@@ -22,7 +22,7 @@ python -m feishu_claudecode_qiao --config config.toml --doctor
 python start_ws.py status --config config.toml --profile qiao-test
 ```
 
-多机器人并行时，每个桥必须使用独立的 `bridge.data_dir` 和对应的 `bridge.ws_profile`。`feishu_ws.meta.json` 会记录当前 WebSocket 属于哪个 config/profile；如果状态检查显示 metadata 不匹配，说明当前桥不应该接管那个 WebSocket，请用对应配置执行 `.\start_all.ps1 -Restart`。
+多机器人并行时，每个桥必须使用独立的 `bridge.data_dir` 和对应的 `bridge.ws_profile`。`feishu_ws.meta.json` 会记录当前 WebSocket 属于哪个 config/profile；如果状态检查显示 metadata 不匹配，说明当前桥不应该接管那个 WebSocket，请用对应配置执行 `.\run_foreground.ps1 -Restart`。
 
 ## 前台窗口看不出是否在处理
 
@@ -30,7 +30,7 @@ python start_ws.py status --config config.toml --profile qiao-test
 
 - `bridge.console_message_log` 是否为 `true`。
 - `bridge.console_claude_stream` 是否为 `true`。
-- 是否使用了 `.\start_all.ps1 -Restart` 前台启动，而不是后台启动。
+- 是否使用了 `.\run_foreground.ps1 -Restart` 前台启动，而不是后台启动。
 - `data/logs/messages.log` 是否仍在写入。如果文件有内容但前台没有，通常是前台镜像开关被关闭。
 
 后台部署可以关闭这两个开关，日志仍会写入 `bridge.log` 和 `messages.log`。
@@ -232,7 +232,7 @@ Claude runner: persistent
 如果仍然显示 `oneshot`，请检查当前启动命令使用的配置文件是不是你修改过的那个，例如：
 
 ```powershell
-.\start_all.ps1 -Restart -Foreground -Config config.realtest.toml
+.\run_foreground.ps1 -Restart -Config config.realtest.toml
 ```
 
 如果配置为 `persistent` 但实际响应仍然像 one-shot，常见原因：
@@ -243,3 +243,4 @@ Claude runner: persistent
 - 当前 Claude session 上下文过大。常驻能减少进程冷启动，但不能让大上下文瞬间变小，需要配合 `/rollover`、长期记忆压缩或固定任务快速路径。
 
 可以在飞书里发送 `/runtime` 查看当前 runner、active worker 数量，以及当前 chat 是否已经复用同一个 worker。
+

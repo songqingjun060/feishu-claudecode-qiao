@@ -1,49 +1,145 @@
 param(
     [string]$Config = "config.realtest.toml",
-    [string]$Profile = "qiao-test"
+    [string]$Profile = "",
+    [switch]$Restart,
+    [switch]$Stop,
+    [switch]$Background
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
 
-Write-Host "[1/4] Checking lark-cli subscriber..." -ForegroundColor Cyan
-$qiaoSubs = Get-CimInstance Win32_Process |
-    Where-Object { $_.CommandLine -match "--profile $([regex]::Escape($Profile)) event \+subscribe" }
-
-if ($qiaoSubs.Count -gt 1) {
-    Write-Host "[WARN] Found multiple $Profile subscribers; cleaning them up." -ForegroundColor Yellow
-    foreach ($proc in $qiaoSubs) {
-        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-    Remove-Item -LiteralPath (Join-Path $PSScriptRoot "data-test\feishu_ws.pid") -Force -ErrorAction SilentlyContinue
+function Invoke-Step {
+    param(
+        [string]$Title,
+        [scriptblock]$Body
+    )
+    Write-Host ""
+    Write-Host "==> $Title" -ForegroundColor Cyan
+    & $Body
 }
 
-Write-Host "[2/4] Ensuring subscriber is running in background..." -ForegroundColor Cyan
-python start_ws.py status --config $Config
-if ($LASTEXITCODE -ne 0) {
-    throw "start_ws.py status failed"
-}
-
-$pidFile = Join-Path $PSScriptRoot "data-test\feishu_ws.pid"
-$needStart = $true
-if (Test-Path -LiteralPath $pidFile) {
-    $pidText = Get-Content -LiteralPath $pidFile -Raw
-    $pidValue = 0
-    if ([int]::TryParse($pidText.Trim(), [ref]$pidValue)) {
-        $needStart = -not [bool](Get-Process -Id $pidValue -ErrorAction SilentlyContinue)
-    }
-}
-
-if ($needStart) {
-    python start_ws.py start --config $Config --profile $Profile --force
+function Assert-Ok {
+    param([string]$Message)
     if ($LASTEXITCODE -ne 0) {
-        throw "start_ws.py start failed"
+        throw $Message
     }
 }
 
-Write-Host "[3/4] Final subscriber status..." -ForegroundColor Cyan
-python start_ws.py status --config $Config
+function Invoke-PythonValue {
+    param([string]$Code)
+    return (python -c $Code).Trim()
+}
 
-Write-Host "[4/4] Starting bridge in this foreground window..." -ForegroundColor Cyan
-Write-Host "Press Ctrl+C to stop the bridge. The lark subscriber remains managed by start_ws.py." -ForegroundColor Gray
-python -m feishu_claudecode_qiao --config $Config
+function Get-BridgePidFile {
+    param([string]$ConfigPath)
+    $code = @"
+from pathlib import Path
+from feishu_claudecode_qiao.config import load_config
+cfg = load_config(r'''$ConfigPath''')
+print(Path(cfg.bridge_data_dir).resolve() / 'bridge.pid')
+"@
+    return Invoke-PythonValue -Code $code
+}
+
+function Get-WsProfile {
+    param([string]$ConfigPath)
+    if ($Profile) {
+        return $Profile
+    }
+    $code = @"
+from feishu_claudecode_qiao.config import load_config
+cfg = load_config(r'''$ConfigPath''')
+print(cfg.bridge_ws_profile)
+"@
+    return Invoke-PythonValue -Code $code
+}
+
+function Test-PidRunning {
+    param([string]$PidFile)
+    if (-not (Test-Path -LiteralPath $PidFile)) {
+        return $false
+    }
+    $pidText = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+    $pidValue = 0
+    if (-not [int]::TryParse($pidText, [ref]$pidValue)) {
+        return $false
+    }
+    return [bool](Get-Process -Id $pidValue -ErrorAction SilentlyContinue)
+}
+
+$bridgePidFile = Get-BridgePidFile -ConfigPath $Config
+$wsProfile = Get-WsProfile -ConfigPath $Config
+$wsPidFile = Join-Path (Split-Path -Parent $bridgePidFile) "feishu_ws.pid"
+
+Invoke-Step "Config" {
+    Write-Host "Project : $PSScriptRoot"
+    Write-Host "Config  : $Config"
+    Write-Host "Profile : $wsProfile"
+    Write-Host "Mode    : $(if ($Stop) { 'stop' } elseif ($Restart) { 'restart' } elseif ($Background) { 'background' } else { 'foreground' })"
+}
+
+if ($Stop) {
+    Invoke-Step "Stop bridge" {
+        python -m feishu_claudecode_qiao --config $Config --stop
+    }
+    Invoke-Step "Stop WebSocket subscriber" {
+        python start_ws.py stop --config $Config --profile $wsProfile
+        Assert-Ok "WebSocket subscriber stop failed"
+    }
+    Invoke-Step "Done" {
+        Write-Host "Bridge and WebSocket are stopped." -ForegroundColor Green
+    }
+    exit 0
+}
+
+if ($Restart) {
+    Invoke-Step "Stop bridge" {
+        python -m feishu_claudecode_qiao --config $Config --stop
+    }
+    Invoke-Step "Restart WebSocket subscriber" {
+        python start_ws.py restart --config $Config --profile $wsProfile --force
+        Assert-Ok "WebSocket subscriber restart failed"
+    }
+} else {
+    Invoke-Step "Ensure WebSocket subscriber" {
+        python start_ws.py status --config $Config --profile $wsProfile
+        if ($LASTEXITCODE -ne 0) {
+            throw "WebSocket subscriber status failed"
+        }
+        if (-not (Test-PidRunning -PidFile $wsPidFile)) {
+            python start_ws.py start --config $Config --profile $wsProfile --force
+            Assert-Ok "WebSocket subscriber start failed"
+        }
+    }
+}
+
+Invoke-Step "WebSocket status" {
+    python start_ws.py status --config $Config --profile $wsProfile
+    Assert-Ok "WebSocket subscriber status failed"
+}
+
+if ($Background) {
+    Invoke-Step "Ensure bridge process" {
+        if ($Restart -or -not (Test-PidRunning -PidFile $bridgePidFile)) {
+            Start-Process -FilePath python `
+                -ArgumentList "-m","feishu_claudecode_qiao","--config",$Config `
+                -WorkingDirectory $PSScriptRoot `
+                -WindowStyle Hidden
+            Start-Sleep -Seconds 2
+        }
+        python -m feishu_claudecode_qiao --config $Config --status
+        Assert-Ok "Bridge status failed"
+    }
+    Invoke-Step "Done" {
+        Write-Host "Bridge is ready in background." -ForegroundColor Green
+        Write-Host "Use .\run_foreground.ps1 -Restart for foreground mode."
+    }
+    exit 0
+}
+
+Invoke-Step "Start bridge in foreground" {
+    Write-Host "Press Ctrl+C to stop the bridge. The paired WebSocket subscriber is managed by this script." -ForegroundColor Gray
+    python -m feishu_claudecode_qiao --config $Config
+}
+exit $LASTEXITCODE

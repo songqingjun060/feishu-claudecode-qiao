@@ -1,4 +1,4 @@
-# Feishu-Claudecode-Qiao
+﻿# Feishu-Claudecode-Qiao
 
 本项目是一个本地运行的飞书机器人桥：接收飞书消息，交给 Claude Code CLI 或实验性常驻 runner 处理，再把文本回复、生成文件或查询结果发回飞书。
 
@@ -112,13 +112,13 @@ prompt_hint = "When the user asks to extract IDs from recent images or files, re
 推荐用一键脚本启动或重启桥和对应 WebSocket 订阅：
 
 ```powershell
-.\start_all.ps1 -Restart
+.\run_foreground.ps1 -Restart
 ```
 
 后台启动：
 
 ```powershell
-.\start_all.ps1 -Restart -Background
+.\run_foreground.ps1 -Restart -Background
 ```
 
 状态和停止：
@@ -220,3 +220,4 @@ data/
 - 日志、附件、图片、缓存和构建产物
 
 不要公开分享真实配置和日志；它们可能包含聊天内容、本地路径和敏感配置线索。
+
