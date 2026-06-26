@@ -16,7 +16,6 @@ class SessionDecision:
     reason: str = ""
 
 
-LIGHT_TEXT_MAX_CHARS = 120
 HEAVY_INPUT_CHARS = 20_000
 HEAVY_MESSAGE_COUNT = 12
 
@@ -53,9 +52,6 @@ def choose_session_strategy(
 
     if _looks_like_work(stripped):
         return SessionDecision("work", saved_session_id or None, reason="work_intent")
-
-    if _is_heavy(session_meta) and len(stripped) <= int(policy.get("light_text_max_chars", LIGHT_TEXT_MAX_CHARS)):
-        return SessionDecision("light", None, remember_turn=False, reason="heavy_session_short_text")
 
     return SessionDecision("work", saved_session_id or None, reason="default_work")
 

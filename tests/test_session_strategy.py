@@ -5,7 +5,7 @@ from feishu_claudecode_qiao.session_strategy import (
 )
 
 
-def test_short_plain_message_uses_light_strategy_when_session_is_heavy():
+def test_short_plain_message_resumes_work_session_when_session_is_heavy():
     meta = SessionMeta(session_key="chat:c1", session_id="sid_old")
     meta.input_chars = 25000
     meta.message_count = 20
@@ -17,9 +17,10 @@ def test_short_plain_message_uses_light_strategy_when_session_is_heavy():
         effective_rule={},
     )
 
-    assert decision.strategy == "light"
-    assert decision.session_id is None
-    assert decision.remember_turn is False
+    assert decision.strategy == "work"
+    assert decision.session_id == "sid_old"
+    assert decision.remember_turn is True
+    assert decision.reason == "default_work"
 
 
 def test_file_or_path_message_uses_work_strategy_and_resumes_session():

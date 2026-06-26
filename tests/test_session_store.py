@@ -128,11 +128,11 @@ def test_calculate_rollover_score_hard_limit():
     assert score >= 100
 
 
-def test_default_rollover_is_not_triggered_at_old_35_turn_limit():
+def test_default_rollover_triggers_at_regular_memory_management_limit():
     meta = SessionMeta(session_key="k")
-    meta.message_count = 35
+    meta.message_count = DEFAULT_RULE["context_policy"]["soft_message_limit"]
     score = calculate_rollover_score(meta, DEFAULT_RULE["context_policy"])
-    assert score < DEFAULT_RULE["context_policy"]["score_threshold"]
+    assert score >= DEFAULT_RULE["context_policy"]["score_threshold"]
 
 
 def test_default_rollover_triggers_at_new_hard_limit_with_activity():

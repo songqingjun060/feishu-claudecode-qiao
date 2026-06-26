@@ -96,6 +96,19 @@ def _remove_pid(pid_file: Path) -> None:
         pid_file.unlink()
 
 
+def _is_all_mention(mention: dict[str, Any]) -> bool:
+    mention_type = str(mention.get("mentioned_type", "") or "").lower()
+    key = str(mention.get("key", "") or "").lower()
+    name = str(mention.get("name", "") or "").strip().lower()
+    return mention_type in {"all", "chat"} or key in {"@all", "@_all"} or name in {"all", "所有人"}
+
+
+def _has_all_mention(content: str, mentions: list[dict[str, Any]] | None) -> bool:
+    if mentions and any(_is_all_mention(mention) for mention in mentions):
+        return True
+    return bool(re.search(r"@_?all\b|@所有人", content or "", re.IGNORECASE))
+
+
 def _stop_bridge(pid_file: Path) -> None:
     """Stop a running bridge instance."""
     if not pid_file.exists():
@@ -3060,9 +3073,12 @@ class Bridge:
         mentions: list[dict[str, Any]] | None,
     ) -> bool:
         """Check if the bot is mentioned in the message."""
+        has_all_mention = _has_all_mention(content, mentions)
         # Check @mentions list
         if mentions:
             for mention in mentions:
+                if _is_all_mention(mention):
+                    continue
                 mention_ids = mention.get("id", {}) or {}
                 if self.config.feishu_app_id in (
                     mention_ids.get("user_id"),
@@ -3081,7 +3097,7 @@ class Bridge:
             return True
 
         # Check for generic @bot or @机器人
-        if re.search(r"@(?:bot|机器人|claude| Claude)", content, re.IGNORECASE):
+        if not has_all_mention and re.search(r"@(?:bot|机器人|claude| Claude)", content, re.IGNORECASE):
             return True
 
         return False
@@ -3284,8 +3300,17 @@ Rules:
         text = reply.lower()
         return (
             "api error: 500" in text
+            or "api error: 502" in text
+            or "api error: 503" in text
+            or "api error: 504" in text
             or "500 internal server error" in text
+            or "502 bad gateway" in text
+            or "503 service unavailable" in text
+            or "504 gateway timeout" in text
             or "internal server error" in text
+            or "bad gateway" in text
+            or "service unavailable" in text
+            or "gateway timeout" in text
         )
 
     def _is_claude_error_reply(self, reply: str) -> bool:

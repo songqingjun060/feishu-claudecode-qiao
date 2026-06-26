@@ -73,12 +73,12 @@ blocked_keywords = []
 #
 # context_policy 示例：
 # mode = "auto_rollover"
-# score_threshold = 100
-# soft_message_limit = 80
-# hard_message_limit = 120
-# ttl_hours = 168
-# min_messages_between_rollovers = 30
-# rollover_cooldown_hours = 12
+# score_threshold = 40
+# soft_message_limit = 30
+# hard_message_limit = 60
+# ttl_hours = 72
+# min_messages_between_rollovers = 20
+# rollover_cooldown_hours = 4
 # carry_summary = true
 # context_error_only = false
 #
@@ -91,4 +91,4 @@ blocked_keywords = []
 #
 # session_strategy 示例：
 # mode = "auto"  # auto / light / work / fresh / stateless
-# light_text_max_chars = 120
+# auto 模式默认按 chat 续用 session；不会因为短文本自动切 light。

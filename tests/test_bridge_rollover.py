@@ -158,7 +158,7 @@ def test_process_event_retries_when_saved_claude_session_is_missing(tmp_path, mo
     assert bridge.session_store.get("chat:oc_1").session_id == "new_sid"
 
 
-def test_short_text_on_heavy_session_uses_light_session_without_overwriting_work_session(tmp_path, monkeypatch):
+def test_short_text_on_heavy_session_resumes_work_session(tmp_path, monkeypatch):
     import json
 
     bridge = make_bridge(tmp_path)
@@ -175,7 +175,7 @@ def test_short_text_on_heavy_session_uses_light_session_without_overwriting_work
 
     def fake_call(prompt, sid, **kwargs):
         calls.append(sid)
-        return ("light reply", "light_sid")
+        return ("work reply", "work_sid")
 
     monkeypatch.setattr(bridge, "_call_claude", fake_call)
     monkeypatch.setattr(bridge, "_send_reply", lambda chat_id, content, msg_type="text": sent.append(content) or True)
@@ -195,8 +195,8 @@ def test_short_text_on_heavy_session_uses_light_session_without_overwriting_work
 
     bridge._process_event_body(event)
 
-    assert calls == [None]
-    assert "light reply" in sent[-1]
+    assert calls == ["work_sid"]
+    assert "work reply" in sent[-1]
     assert bridge.session_store.get("chat:oc_1").session_id == "work_sid"
 
 
@@ -209,7 +209,7 @@ def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monke
     bridge.session_store.record_turn("chat:oc_1", 25_000, 100)
     sent = []
 
-    monkeypatch.setattr(bridge, "_call_claude", lambda prompt, sid, **kwargs: ("ok", "light_sid"))
+    monkeypatch.setattr(bridge, "_call_claude", lambda prompt, sid, **kwargs: ("ok", "work_sid"))
     monkeypatch.setattr(bridge, "_send_reply", lambda chat_id, content, msg_type="text": sent.append(content) or True)
 
     event = {
@@ -233,10 +233,10 @@ def test_context_decision_audit_records_prompt_size_and_strategy(tmp_path, monke
         for line in (tmp_path / "logs" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     decision = [record for record in records if record.get("action") == "context_decision"][-1]
-    assert decision["strategy"] == "light"
+    assert decision["strategy"] == "work"
     assert decision["prompt_chars"] > 0
     assert "memory_context_chars" in decision
-    assert decision["resumed"] is False
+    assert decision["resumed"] is True
     assert "Claude runtime: key=chat:oc_1" in caplog.text
     assert bridge.session_store.get("chat:oc_1").force_rollover_next is False
 
@@ -249,6 +249,33 @@ def test_call_claude_with_recovery_retries_transient_500(tmp_path, monkeypatch):
         calls.append(sid)
         if len(calls) == 1:
             return ("API Error: 500 500 Internal Server Error", sid)
+        return ("ok", "sid_1")
+
+    monkeypatch.setattr(bridge, "_call_claude", fake_call)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    reply, new_session = bridge._call_claude_with_recovery(
+        "prompt",
+        "sid_1",
+        "chat:c1",
+        resolve_rule({}),
+        cwd=str(tmp_path),
+        permission_mode="bypassPermissions",
+    )
+
+    assert calls == ["sid_1", "sid_1"]
+    assert reply == "ok"
+    assert new_session == "sid_1"
+
+
+def test_call_claude_with_recovery_retries_transient_502(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    calls = []
+
+    def fake_call(prompt, sid, **kwargs):
+        calls.append(sid)
+        if len(calls) == 1:
+            return ("API Error: 502 502 Bad Gateway", sid)
         return ("ok", "sid_1")
 
     monkeypatch.setattr(bridge, "_call_claude", fake_call)
