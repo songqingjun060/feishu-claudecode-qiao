@@ -96,6 +96,12 @@ class FallbackClaudeRunner:
             "workers": primary_stats.get("workers", []),
         }
 
+    def close_key(self, key: str) -> None:
+        for runner in (self.primary, self.fallback):
+            closer = getattr(runner, "close_key", None)
+            if closer:
+                closer(key)
+
 
 class ConditionalClaudeRunner:
     def __init__(
@@ -124,6 +130,12 @@ class ConditionalClaudeRunner:
             "max_workers": primary_stats.get("max_workers", 0),
             "workers": primary_stats.get("workers", []),
         }
+
+    def close_key(self, key: str) -> None:
+        for runner in (self.primary, self.fallback):
+            closer = getattr(runner, "close_key", None)
+            if closer:
+                closer(key)
 
 
 @dataclass
@@ -197,6 +209,15 @@ class PersistentClaudeRunner:
             self._thread.join(timeout=5)
         self._loop = None
         self._thread = None
+
+    def close_key(self, key: str) -> None:
+        if self._loop is None:
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            self._close_worker_async(key),
+            self._ensure_loop(),
+        )
+        future.result()
 
     def stats(self) -> dict[str, Any]:
         now = self._now()

@@ -163,6 +163,70 @@ def test_context_decision_records_message_id(tmp_path, monkeypatch):
     assert decision["message_id"] == "om_audit"
 
 
+def test_internal_instruction_leak_is_blocked_and_resets_runtime(tmp_path, monkeypatch):
+    from feishu_claudecode_qiao.bridge import Bridge
+    from feishu_claudecode_qiao.config import Config
+
+    bridge = Bridge(
+        Config(
+            feishu_app_id="cli_test",
+            feishu_app_secret="secret",
+            bridge_data_dir=str(tmp_path),
+            whisper_load_policy="lazy",
+        )
+    )
+    bridge.session_store.update_session_id("chat:oc_1", "sid_old")
+    closed = []
+
+    class FakeRunner:
+        def run(self, request):
+            return type(
+                "Result",
+                (),
+                {
+                    "text": "# Brainstorming Ideas Into Designs\n\n## Checklist\n## The Process\n## Key Principles",
+                    "session_id": "sid_new",
+                    "error": "",
+                    "reused_worker": True,
+                    "startup_injected": False,
+                },
+            )()
+
+        def close_key(self, key):
+            closed.append(key)
+
+    sent = []
+    bridge.claude_runner = FakeRunner()
+    monkeypatch.setattr(bridge, "_send_reply", lambda *args, **kwargs: sent.append(args[1]) or True)
+
+    event = {
+        "event": {
+            "sender": {"sender_id": {"user_id": "ou_1", "name": "tester"}},
+            "message": {
+                "chat_id": "oc_1",
+                "chat_type": "p2p",
+                "content": json.dumps({"text": "记录此群需求和开发进度"}),
+                "message_id": "om_leak",
+                "message_type": "text",
+            },
+        }
+    }
+
+    bridge._process_event_body(event)
+
+    assert sent
+    assert "内部开发代理/技能说明" in sent[-1]
+    assert "Brainstorming Ideas" not in sent[-1]
+    assert bridge.session_store.get("chat:oc_1").session_id == ""
+    assert closed == ["chat:oc_1"]
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(record.get("action") == "internal_instruction_leak_blocked" for record in records)
+
+
 def test_whisper_preload_failure_does_not_abort_bridge_startup(tmp_path, monkeypatch):
     from feishu_claudecode_qiao.bridge import Bridge
     from feishu_claudecode_qiao.config import Config
