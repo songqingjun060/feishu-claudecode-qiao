@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 
 import start_ws
 
@@ -235,7 +237,11 @@ def test_whisper_preload_failure_does_not_abort_bridge_startup(tmp_path, monkeyp
         def __init__(self, *args, **kwargs):
             raise RuntimeError("model download failed")
 
-    monkeypatch.setattr("faster_whisper.WhisperModel", BrokenWhisperModel)
+    monkeypatch.setitem(
+        sys.modules,
+        "faster_whisper",
+        types.SimpleNamespace(WhisperModel=BrokenWhisperModel),
+    )
 
     bridge = Bridge(
         Config(
