@@ -238,6 +238,13 @@ def test_reset_session_keeps_memory(tmp_path):
         rolling_summary="memory stays",
     )
     bridge.session_store.update_session_id("chat:c1", "sess_2")
+    closed = []
+
+    class ClosableRunner:
+        def close_key(self, key):
+            closed.append(key)
+
+    bridge.claude_runner = ClosableRunner()
 
     reply = bridge._handle_command(
         __import__("feishu_claudecode_qiao.commands", fromlist=["Command"]).Command("reset", "session", True),
@@ -253,7 +260,28 @@ def test_reset_session_keeps_memory(tmp_path):
     meta = bridge.session_store.get("chat:c1")
     assert meta.session_id == ""
     assert meta.memory["rolling_summary"] == "memory stays"
+    assert closed == ["chat:c1"]
     assert "session" in reply.lower() or "会话" in reply
+
+
+def test_new_session_closes_runtime_worker(tmp_path):
+    from feishu_claudecode_qiao.rule_engine import resolve_rule
+    from feishu_claudecode_qiao.commands import Command
+
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sess_1")
+    closed = []
+
+    class ClosableRunner:
+        def close_key(self, key):
+            closed.append(key)
+
+    bridge.claude_runner = ClosableRunner()
+
+    bridge._handle_command(Command("new", "", True), resolve_rule({}), "chat:c1", "c1", "u1", "tester", {}, "p2p")
+
+    assert bridge.session_store.get("chat:c1").session_id == ""
+    assert closed == ["chat:c1"]
 
 
 def test_reset_all_clears_memory(tmp_path):

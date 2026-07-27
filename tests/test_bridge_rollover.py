@@ -295,6 +295,46 @@ def test_call_claude_with_recovery_retries_transient_502(tmp_path, monkeypatch):
     assert new_session == "sid_1"
 
 
+def test_call_claude_with_recovery_resets_encrypted_content_error(tmp_path, monkeypatch):
+    bridge = make_bridge(tmp_path)
+    bridge.session_store.update_session_id("chat:c1", "sid_old")
+    calls = []
+    closed = []
+
+    class ClosableRunner:
+        def close_key(self, key):
+            closed.append(key)
+
+    def fake_run(prompt, sid, **kwargs):
+        calls.append((prompt, sid, kwargs.get("startup_prompt", "")))
+        if len(calls) == 1:
+            return (
+                "API Error: 400 The encrypted content cMDI...VrRv could not be verified. "
+                "Reason: Encrypted content could not be decrypted or parsed.",
+                sid,
+            )
+        return ("ok", "sid_new")
+
+    bridge.claude_runner = ClosableRunner()
+    monkeypatch.setattr(bridge, "_run_claude", fake_run)
+
+    reply, new_session = bridge._call_claude_with_recovery(
+        "prompt",
+        "sid_old",
+        "chat:c1",
+        resolve_rule({}),
+        cwd=str(tmp_path),
+        permission_mode="bypassPermissions",
+        startup_prompt="startup",
+    )
+
+    assert calls == [("prompt", "sid_old", "startup"), ("prompt", None, "startup")]
+    assert closed == ["chat:c1"]
+    assert bridge.session_store.get("chat:c1").session_id == ""
+    assert reply == "ok"
+    assert new_session == "sid_new"
+
+
 def test_call_claude_with_recovery_rolls_over_on_context_limit(tmp_path, monkeypatch):
     bridge = make_bridge(tmp_path)
     bridge.session_store.update_session_id("chat:c1", "sid_old")

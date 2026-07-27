@@ -1309,6 +1309,8 @@ class Bridge:
         content: str,
         effective_security: SecurityPolicy,
     ) -> bool:
+        if self._has_current_media_context(chat_id, sender):
+            return False
         match = self.task_router.match(
             content,
             TaskContext(
@@ -1397,6 +1399,10 @@ class Bridge:
             uploaded=uploaded,
         )
         return True
+
+    def _has_current_media_context(self, chat_id: str, sender: str) -> bool:
+        batch = self.media_batcher.current_batch(chat_id=chat_id, sender_id=sender)
+        return bool(batch and batch.items)
 
     def _file_tool_hint(self, path: str) -> str:
         suffix = Path(path).suffix.lower()
@@ -2198,6 +2204,7 @@ class Bridge:
                 sender_name,
             )
 
+        user_content = content
         strategy_content = content
 
         content = self._append_verified_path_context(content, allowed_path_candidates)
@@ -2449,7 +2456,7 @@ class Bridge:
             uploaded_generated_table = self._maybe_upload_generated_table_from_reply(
                 chat_id,
                 msg_id if chat_type == "group" else "",
-                content,
+                user_content,
                 reply,
                 effective_security,
             )
@@ -2478,7 +2485,7 @@ class Bridge:
             uploaded_reply_file = self._maybe_upload_file_from_claude_reply(
                 chat_id,
                 msg_id if chat_type == "group" else "",
-                content,
+                user_content,
                 reply,
                 effective_security,
             )
@@ -2598,13 +2605,13 @@ class Bridge:
                 action = (cmd.args or "session").strip().lower()
                 if action == "all":
                     self.session_store.clear_memory(session_key)
-                    self.session_store.clear_session_id(session_key)
+                    self._clear_session_and_close_runtime(session_key)
                     return "当前会话和长期记忆已重置。"
-                self.session_store.clear_session_id(session_key)
+                self._clear_session_and_close_runtime(session_key)
             return "当前 Claude session 已重置，长期记忆已保留。"
         elif cmd.name == "new":
             if session_key:
-                self.session_store.clear_session_id(session_key)
+                self._clear_session_and_close_runtime(session_key)
             return "已开启新的 Claude session，长期记忆已保留。"
         elif cmd.name == "rollover":
             summary = self._maybe_rollover_session(session_key, effective_rule, force=True)
@@ -3248,11 +3255,22 @@ Rules:
         return sum(1 for marker in structural_markers if marker in text) >= 3
 
     def _reset_runtime_after_internal_leak(self, session_key: str | None) -> None:
-        if session_key:
-            self.session_store.clear_session_id(session_key)
-            closer = getattr(self.claude_runner, "close_key", None)
-            if closer:
+        self._clear_session_and_close_runtime(session_key)
+
+    def _clear_session_and_close_runtime(self, session_key: str | None) -> None:
+        if not session_key:
+            return
+        self.session_store.clear_session_id(session_key)
+        closer = getattr(self.claude_runner, "close_key", None)
+        if closer:
+            try:
                 closer(session_key)
+            except Exception as exc:
+                self.bridge_logger.warning(
+                    "Failed to close Claude runtime worker for %s: %s",
+                    session_key,
+                    exc,
+                )
 
     def _build_prompt(
         self,
@@ -3375,6 +3393,17 @@ Rules:
             or "bad gateway" in text
             or "service unavailable" in text
             or "gateway timeout" in text
+        )
+
+    def _is_encrypted_content_verification_error(self, reply: str) -> bool:
+        text = (reply or "").lower()
+        return (
+            "api error: 400" in text
+            and "encrypted content" in text
+            and (
+                "could not be verified" in text
+                or "could not be decrypted or parsed" in text
+            )
         )
 
     def _is_claude_error_reply(self, reply: str) -> bool:
@@ -3605,11 +3634,32 @@ Rules:
             if self._is_transient_claude_error(reply):
                 return "Claude 服务端暂时返回 500，已自动重试一次仍失败。请稍后再试。", new_session
 
+        if session_key and self._is_encrypted_content_verification_error(reply):
+            self.bridge_logger.warning(
+                "Claude encrypted content verification failed; resetting session runtime: %s",
+                session_key,
+            )
+            self._clear_session_and_close_runtime(session_key)
+            reply, new_session = self._run_claude(
+                prompt,
+                None,
+                session_key=session_key,
+                chat_id=chat_id,
+                cwd=cwd,
+                permission_mode=permission_mode,
+                startup_prompt=startup_prompt,
+            )
+            if self._is_encrypted_content_verification_error(reply):
+                return (
+                    "Claude 当前会话的加密上下文无法校验，已清理并重试一次仍失败。请稍后再试。",
+                    new_session,
+                )
+
         if session_key and session_id and self._is_missing_claude_session_reply(reply):
             self.bridge_logger.warning(
                 f"Claude session missing, retrying without session: {session_id}"
             )
-            self.session_store.clear_session_id(session_key)
+            self._clear_session_and_close_runtime(session_key)
             return self._run_claude(
                 prompt,
                 None,
