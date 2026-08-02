@@ -109,7 +109,9 @@ prompt_hint = "When the user asks to extract IDs from recent images or files, re
 
 ## 运行
 
-推荐用一键脚本启动或重启桥和对应 WebSocket 订阅：
+Windows 上可直接双击 `start_qiao.cmd`，它会打开前台窗口并重启桥和对应 WebSocket 订阅。
+
+命令行启动：
 
 ```powershell
 .\run_foreground.ps1 -Restart

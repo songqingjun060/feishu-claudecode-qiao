@@ -114,7 +114,9 @@ python -m pytest -q
 
 ## 6. 启动
 
-推荐使用一键脚本启动或重启。默认是前台窗口，方便观察日志：
+Windows 上可直接双击 `start_qiao.cmd`。默认是前台窗口，方便观察日志。
+
+命令行启动：
 
 ```powershell
 Set-Location -LiteralPath D:\feishu-claudecode-qiao
