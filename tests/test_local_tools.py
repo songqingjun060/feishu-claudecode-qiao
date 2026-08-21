@@ -68,3 +68,34 @@ def test_local_tool_runner_returns_error_on_timeout(tmp_path, monkeypatch):
     assert result.ok is False
     assert "超时" in result.error
     assert "sample" in result.error
+
+
+def test_health_runner_preserves_structured_failure_status(tmp_path, monkeypatch):
+    tool = LocalToolConfig(
+        name="sample",
+        cwd=str(tmp_path),
+        health_command=["tool.exe", "--health"],
+    )
+
+    class Completed:
+        returncode = 1
+        stdout = json.dumps(
+            {
+                "ok": False,
+                "status": "auth_expired",
+                "message": "鉴权已失效",
+            },
+            ensure_ascii=False,
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "feishu_claudecode_qiao.tasks.local_tool.subprocess.run",
+        lambda *args, **kwargs: Completed(),
+    )
+
+    result = LocalToolRunner().run_health_check(tool)
+
+    assert result.ok is False
+    assert result.status == "auth_expired"
+    assert result.message == "鉴权已失效"

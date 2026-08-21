@@ -47,6 +47,7 @@ from .event_dispatcher import ChatEventDispatcher
 from .scheduler import ChatScheduler, QueuePolicy
 from .task_router import TaskContext, TaskRouter
 from .tasks.local_tool import LocalToolRequest, LocalToolRunner
+from .local_tool_health import LocalToolHealthMonitor
 from .timing import RunTiming
 from .session_strategy import choose_session_strategy
 
@@ -197,6 +198,12 @@ class Bridge:
         self.bridge_logger.info(f"Claude runner: {config.claude_runner or 'oneshot'}")
         self.task_router = TaskRouter(config.bridge_local_tools)
         self.local_tool_runner = LocalToolRunner()
+        self.local_tool_health_monitor = LocalToolHealthMonitor(
+            config.bridge_local_tools,
+            self.local_tool_runner,
+            self.bridge_logger,
+            self.audit,
+        )
         self._state_lock = RLock()
         self._token_lock = RLock()
         self._token: str | None = None
@@ -1730,6 +1737,8 @@ class Bridge:
         self.bridge_logger.info("=" * 50)
         self.bridge_logger.info("Bridge running. Press Ctrl+C to stop.")
         self.bridge_logger.info("=" * 50)
+        if self.local_tool_health_monitor.start():
+            self.bridge_logger.info("Local tool health monitor started.")
 
         self.bridge_logger.info(f"Loaded {len(self.session_store._data)} sessions from store")
 
@@ -1781,6 +1790,7 @@ class Bridge:
         except KeyboardInterrupt:
             self.bridge_logger.info("Stopping...")
         finally:
+            self.local_tool_health_monitor.stop()
             self.event_dispatcher.stop(timeout=10)
             self._save_sessions()
             close_runner = getattr(self.claude_runner, "close_all", None)

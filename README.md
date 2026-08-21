@@ -16,6 +16,20 @@
 - 支持 `oneshot` 稳定 runner 和 `persistent` SDK-backed 实验加速 runner；persistent 失败会自动回退 oneshot。
 - audit 日志包含 `message_id`、策略、耗时、runtime 复用和 startup 注入状态，便于按消息排查。
 
+## 集成结构
+
+```mermaid
+flowchart LR
+  F[Feishu / Lark] --> B[feishu-claudecode-qiao bridge]
+  B --> C[Claude Code CLI / persistent runner]
+  B --> L[local_tools]
+  L --> A[local agent wrapper or custom script]
+  A --> CLI[Lark CLI or any other local command]
+  CLI --> F
+```
+
+当前桥里已经有 `local_tools` 路由，因此可以把 `Lark CLI` 或任何本地 agent 包成一个命令，再让飞书消息触发它。桥负责消息、会话、记忆和回传；本地 agent 负责真正的业务动作。
+
 ## 安装
 
 ```bash
@@ -82,7 +96,26 @@ blocked_keywords = []
 
 本地工具快速路径使用通用 `[[local_tools]]` 配置。桥只负责命中关键词/正则、执行本地命令、解析 stdout 和上传工具返回的附件路径；具体业务逻辑放在你自己的本地工具里，不需要提交到本项目。
 
+需要定期确认本地工具联通状态时，可为该工具配置 `health_command`。桥会在后台按 `health_interval_seconds` 运行探测，只把结果写到 `bridge.log` 和 `audit.jsonl`，不会影响消息队列或定时往飞书聊天发送状态。仅当探测明确返回 `status="auth_expired"` 时，桥才会按冷却时间执行一次可选的 `refresh_command`，随后复检；TLS、网络、超时和 5xx 不会触发鉴权刷新。
+
+飞书在线表格和多维表格建议优先走 `lark-cli`，因为 `lark-cli` 已经覆盖 `sheets` 和 `base` 读接口。当前只接了只读路径：`sheets +read`、`base +table-list`、`base +record-list`，不自动写表、删记录或改权限。
+
 ```toml
+[[local_tools]]
+name = "lark_cli_table"
+enabled = true
+keywords = []
+match_patterns = [
+  "https?://\\S*\\.feishu\\.cn/(?:sheets|base|bitable)/\\S+",
+  "https?://\\S*\\.larksuite\\.com/(?:sheets|base|bitable)/\\S+"
+]
+command = ["python", "scripts/lark_cli_table_tool.py", "--prompt", "{content}", "--profile", "qiao-test", "--identity", "bot"]
+cwd = "D:/feishu-claudecode-qiao"
+timeout_seconds = 90
+summary_fields = ["summary", "message", "text"]
+context_label = "lark-cli table result"
+prompt_hint = "Read Feishu Sheets or Base URLs through lark-cli. This local tool is read-only."
+
 [[local_tools]]
 name = "sample_lookup"
 enabled = true
@@ -91,6 +124,13 @@ match_patterns = ["\\b[A-Z]{2}\\d{4}\\b"]
 command = ["python", "lookup.py", "--ids", "{matches}"]
 cwd = "D:/your-local-tool"
 timeout_seconds = 180
+health_command = ["python", "lookup.py", "--health"]
+health_interval_seconds = 900
+health_startup_delay_seconds = 15
+health_timeout_seconds = 30
+refresh_command = ["python", "lookup.py", "--refresh-auth"]
+refresh_timeout_seconds = 180
+refresh_cooldown_seconds = 1800
 summary_fields = ["summary", "message", "text"]
 attachment_path_fields = ["attachment_path", "file_path", "excelFilePath", "excel_path"]
 context_label = "sample lookup result"

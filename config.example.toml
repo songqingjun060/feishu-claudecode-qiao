@@ -50,6 +50,23 @@ bot_admins = []
 allowed_paths = []
 blocked_keywords = []
 
+# Read-only Feishu Sheets/Base path. This uses lark-cli because it covers
+# spreadsheet and Base APIs better than the bridge's IM-focused HTTP layer.
+# [[local_tools]]
+# name = "lark_cli_table"
+# enabled = true
+# keywords = []
+# match_patterns = [
+#   "https?://\\S*\\.feishu\\.cn/(?:sheets|base|bitable)/\\S+",
+#   "https?://\\S*\\.larksuite\\.com/(?:sheets|base|bitable)/\\S+"
+# ]
+# command = ["python", "scripts/lark_cli_table_tool.py", "--prompt", "{content}", "--profile", "qiao-test", "--identity", "bot"]
+# cwd = "."
+# timeout_seconds = 90
+# summary_fields = ["summary", "message", "text"]
+# context_label = "lark-cli table result"
+# prompt_hint = "Read Feishu Sheets or Base URLs through lark-cli. This is read-only; write/delete operations are not routed here."
+
 # 本地工具快速路径示例：
 # 桥只负责按关键词/正则命中、执行本地命令、解析 stdout，并上传命令返回的附件路径。
 # 具体业务逻辑应放在你自己的本地工具里，不需要提交到这个桥项目。
@@ -62,10 +79,35 @@ blocked_keywords = []
 # command = ["python", "lookup.py", "--ids", "{matches}", "--text", "{content}"]
 # cwd = "D:/your-local-tool"
 # timeout_seconds = 180
+# 可选健康探测：默认不启用。桥会后台运行 health_command，不阻塞飞书收消息，
+# 并把结果写入 bridge.log 和 audit.jsonl，不会定时往聊天发送消息。
+# 当 health_command 明确返回 status="auth_expired" 时，才会运行 refresh_command。
+# health_command = ["python", "lookup.py", "--health"]
+# health_interval_seconds = 900
+# health_startup_delay_seconds = 15
+# health_timeout_seconds = 30
+# refresh_command = ["python", "lookup.py", "--refresh-auth"]
+# refresh_timeout_seconds = 180
+# refresh_cooldown_seconds = 1800
 # attachment_path_fields = ["attachment_path", "file_path", "excelFilePath", "excel_path"]
 # summary_fields = ["summary", "message", "text"]
 # context_label = "sample lookup result"
 # prompt_hint = "When the user asks to extract IDs from recent images or files, read the media/file context, extract all IDs, deduplicate them, run command_template once with every ID, and upload any returned attachment path."
+
+# [[local_tools]]
+# name = "local_agent_bridge"
+# enabled = true
+# keywords = ["分析", "总结", "查表", "表格", "agent"]
+# match_patterns = []
+# command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/run_local_agent.ps1", "--prompt", "{content}"]
+# cwd = "."
+# timeout_seconds = 900
+# summary_fields = ["summary", "message", "text"]
+# context_label = "local agent result"
+# prompt_hint = "Use a local agent to process the user's request. This wrapper can call Codex, Claude, or any other local command configured through LOCAL_AGENT_COMMAND."
+#
+# Optional: set LOCAL_AGENT_COMMAND_JSON to a JSON array such as
+# ["codex", "exec"] when the executable path contains spaces.
 
 # 会话翻页和长期记忆策略目前来自默认会话规则和按会话规则文件。
 # 当前全局配置加载器不会读取单独的 [context_policy] 或 [memory_policy] 表；

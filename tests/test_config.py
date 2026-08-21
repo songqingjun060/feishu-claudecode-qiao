@@ -74,6 +74,13 @@ match_patterns = ["\\\\b[A-Z]{2}\\\\d{4}\\\\b"]
 command = ["sample.exe", "--ids", "{matches}"]
 cwd = "D:/tools/sample"
 timeout_seconds = 30
+health_command = ["sample.exe", "--health"]
+health_interval_seconds = 900
+health_startup_delay_seconds = 15
+health_timeout_seconds = 12
+refresh_command = ["sample.exe", "--refresh-auth"]
+refresh_timeout_seconds = 120
+refresh_cooldown_seconds = 1800
 context_label = "sample lookup"
 prompt_hint = "Extract every code from recent images or files, then call this tool."
 """.strip(),
@@ -99,5 +106,12 @@ prompt_hint = "Extract every code from recent images or files, then call this to
     assert tool.command == ["sample.exe", "--ids", "{matches}"]
     assert tool.cwd == "D:/tools/sample"
     assert tool.timeout_seconds == 30
+    assert tool.health_command == ["sample.exe", "--health"]
+    assert tool.health_interval_seconds == 900
+    assert tool.health_startup_delay_seconds == 15
+    assert tool.health_timeout_seconds == 12
+    assert tool.refresh_command == ["sample.exe", "--refresh-auth"]
+    assert tool.refresh_timeout_seconds == 120
+    assert tool.refresh_cooldown_seconds == 1800
     assert tool.context_label == "sample lookup"
     assert tool.prompt_hint == "Extract every code from recent images or files, then call this tool."
